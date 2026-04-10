@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FRIDAY 3D Core - Forensic Observer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Space+Grotesk:wght@300;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="canvas3d"></canvas>
+      
+      <div class="hud">
+        <header class="presence-status">
+          <div class="telemetry-chip">
+            <span class="dot"></span>
+            <span id="presence-mode">SNTNL.MODE.IDLE</span>
+          </div>
+          <h1 id="presence-headline">FRIDAY CORE 01</h1>
+          <p id="presence-whisper">AWAITING SEQUENCE DISPATCH</p>
+        </header>
+
+        <aside class="activity-feed">
+          <div class="glass-panel">
+            <h3>TELEMETRY_FEED</h3>
+            <div id="feed-list"></div>
+          </div>
+        </aside>
+
+        <footer class="command-input">
+          <form id="objective-form">
+            <input type="text" id="objective-input" placeholder="DISPATCH OBJECTIVE..." autocomplete="off" />
+            <div class="input-glow"></div>
+          </form>
+        </footer>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
