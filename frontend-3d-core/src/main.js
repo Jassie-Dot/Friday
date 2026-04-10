@@ -115,7 +115,7 @@ function initComputeRenderer() {
 
   // Initial Positions - Dramatic spiral pattern
   for (let i = 0; i < positionData.length; i += 4) {
-    const r = 3 + Math.random() * 5;
+    const r = 1.0 + Math.random() * 2.0; // Smaller core initialization (was 3 and 5)
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(2 * Math.random() - 1);
 
@@ -165,7 +165,8 @@ function initParticles() {
       uSize: { value: 2.0 },
       uTime: { value: 0 },
       uState: { value: 0 },
-      uEnergy: { value: 0.15 }
+      uEnergy: { value: 0.15 },
+      uAudio: { value: 0 }
     },
     vertexShader: vertShader,
     fragmentShader: fragShader,
@@ -176,6 +177,7 @@ function initParticles() {
 
   particleSystem = new THREE.Points(geometry, material);
   particleSystem.position.z = 0;
+  particleSystem.scale.set(0.6, 0.6, 0.6); // Scale down for smaller core
   scene.add(particleSystem);
 }
 
@@ -205,6 +207,7 @@ function animate() {
   particleSystem.material.uniforms.uTime.value = elapsed;
   particleSystem.material.uniforms.uState.value = stateIdx;
   particleSystem.material.uniforms.uEnergy.value = currentPresence.energy;
+  particleSystem.material.uniforms.uAudio.value = audioLevel; // Pass audio to particle system
 
   // Update colors based on state
   const colors = getStateColors(currentPresence.mode);

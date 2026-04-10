@@ -152,8 +152,8 @@ void main() {
   // Apply center pull/push
   vortex += flowDir * centerPull;
 
-  // Apply explosive force
-  vortex += flowDir * explosiveForce;
+  // Apply explosive force (increased by audio to create live reaction)
+  vortex += flowDir * (explosiveForce + uAudio * 0.4);
 
   // Mix with original position for organic feel
   pos = mix(pos, vortex, 0.4 + uEnergy * 0.3);
@@ -166,8 +166,8 @@ void main() {
     pos += flowDir * 0.08 * (1.2 - dist);
   }
 
-  // Gentle orbit rotation
-  float orbitAngle = 0.003 + uAudio * 0.008;
+  // Gentle orbit rotation (speed up heavily with audio reaction)
+  float orbitAngle = 0.003 + uAudio * 0.08;
   mat2 rot = mat2(cos(orbitAngle), -sin(orbitAngle), sin(orbitAngle), cos(orbitAngle));
   pos.xz = rot * pos.xz;
 
@@ -176,10 +176,10 @@ void main() {
 
   // Respawn particles
   if(life <= 0.0 || dist > 14.0) {
-    // Spawn in dramatic spiral pattern
+    // Spawn in dramatic spiral pattern within a smaller radius
     float spawnAngle = fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453 + uTime * 0.1) * 6.28318;
-    float spawnRadius = 6.0 + fract(sin(dot(uv, vec2(93.989, 67.345))) * 23456.78) * 4.0;
-    float spawnHeight = (fract(sin(dot(uv, vec2(45.233, 89.123))) * 34567.89) - 0.5) * 4.0;
+    float spawnRadius = 2.0 + fract(sin(dot(uv, vec2(93.989, 67.345))) * 23456.78) * 2.0; // Smaller spawn
+    float spawnHeight = (fract(sin(dot(uv, vec2(45.233, 89.123))) * 34567.89) - 0.5) * 1.5;
 
     pos = vec3(
       cos(spawnAngle) * spawnRadius,

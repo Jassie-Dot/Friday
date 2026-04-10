@@ -59,11 +59,11 @@ float stars(vec2 uv, float density) {
 }
 
 void main() {
-  vUv = gl_FragCoord.xy / uResolution;
+  vec2 fragUv = gl_FragCoord.xy / uResolution;
 
   // Mouse parallax
   vec2 mouseOffset = (uMouse - 0.5) * 0.02;
-  vec2 uv = vUv + mouseOffset;
+  vec2 uv = fragUv + mouseOffset;
 
   // Center point for radial effects
   vec2 center = uv - 0.5;
