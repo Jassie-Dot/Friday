@@ -9,7 +9,9 @@ set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
 
 set "FRIDAY_HOST=127.0.0.1"
 set "FRIDAY_PORT=8000"
-set "FRIDAY_FRONTEND_MODE=particles"
+set "FRIDAY_FRONTEND_MODE=3d-core"
+set "FRIDAY_3D_CORE_HOST=127.0.0.1"
+set "FRIDAY_3D_CORE_PORT=3001"
 set "FRIDAY_PARTICLES_HOST=127.0.0.1"
 set "FRIDAY_PARTICLES_PORT=5173"
 set "FRIDAY_ANTIGRAVITY_HOST=127.0.0.1"
@@ -36,6 +38,8 @@ for /f "usebackq tokens=1,* delims==" %%A in ("%ENV_FILE%") do (
     if /I "%%A"=="FRIDAY_FRONTEND_MODE" set "FRIDAY_FRONTEND_MODE=%%B"
     if /I "%%A"=="FRIDAY_PARTICLES_HOST" set "FRIDAY_PARTICLES_HOST=%%B"
     if /I "%%A"=="FRIDAY_PARTICLES_PORT" set "FRIDAY_PARTICLES_PORT=%%B"
+    if /I "%%A"=="FRIDAY_3D_CORE_HOST" set "FRIDAY_3D_CORE_HOST=%%B"
+    if /I "%%A"=="FRIDAY_3D_CORE_PORT" set "FRIDAY_3D_CORE_PORT=%%B"
     if /I "%%A"=="FRIDAY_ANTIGRAVITY_HOST" set "FRIDAY_ANTIGRAVITY_HOST=%%B"
     if /I "%%A"=="FRIDAY_ANTIGRAVITY_PORT" set "FRIDAY_ANTIGRAVITY_PORT=%%B"
     if /I "%%A"=="FRIDAY_PRIMARY_MODEL" set "FRIDAY_PRIMARY_MODEL=%%B"
@@ -75,6 +79,7 @@ if errorlevel 1 (
     echo Install Node.js 20+ and run the launcher again.
     goto :fail
 )
+call :npm_install "frontend-3d-core" || goto :fail
 call :npm_install "frontend-particles" || goto :fail
 call :npm_install "frontend-antigravity" || goto :fail
 
@@ -107,10 +112,14 @@ if /I "%FRIDAY_FRONTEND_MODE%"=="antigravity" (
     set "FRONTEND_DIR=%ROOT%\frontend-antigravity"
     set "FRONTEND_HOST=%FRIDAY_ANTIGRAVITY_HOST%"
     set "FRONTEND_PORT=%FRIDAY_ANTIGRAVITY_PORT%"
-) else (
+) else if /I "%FRIDAY_FRONTEND_MODE%"=="particles" (
     set "FRONTEND_DIR=%ROOT%\frontend-particles"
     set "FRONTEND_HOST=%FRIDAY_PARTICLES_HOST%"
     set "FRONTEND_PORT=%FRIDAY_PARTICLES_PORT%"
+) else (
+    set "FRONTEND_DIR=%ROOT%\frontend-3d-core"
+    set "FRONTEND_HOST=%FRIDAY_3D_CORE_HOST%"
+    set "FRONTEND_PORT=%FRIDAY_3D_CORE_PORT%"
 )
 set "FRONTEND_URL=http://%FRONTEND_HOST%:%FRONTEND_PORT%"
 
@@ -132,8 +141,8 @@ echo Frontend: %FRONTEND_URL%
 echo Mode: %FRIDAY_FRONTEND_MODE%
 echo.
 echo Notes:
-echo - The particle frontend is the default immersive presence surface.
-echo - Set FRIDAY_FRONTEND_MODE=antigravity in .env to switch frontends.
+echo - The new 3D Core frontend is the default immersive presence surface.
+echo - Set FRIDAY_FRONTEND_MODE=antigravity or particles in .env to switch frontends.
 echo - Stable Diffusion still needs FRIDAY_STABLE_DIFFUSION_MODEL_PATH pointed to local weights.
 echo - Faster-Whisper models download locally on first transcription if missing from cache.
 echo.

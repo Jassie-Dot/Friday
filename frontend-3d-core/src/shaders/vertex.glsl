@@ -12,38 +12,39 @@ void main() {
   vec3 pos = data.rgb;
   vLife = data.a;
 
-  // Calculate distance from camera for depth
   vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
   float dist = length(mvPosition.xyz);
   vDist = dist;
 
-  // Audio reactive boost
-  float audioBoost = 1.0 + (uAudio * 4.0); // Intense size pulse with audio
+  float audioBoost = 1.0 + (uAudio * 1.5);
+  float baseSize = uSize * (350.0 / dist) * audioBoost;
 
-  // Base size with depth falloff
-  float baseSize = uSize * (250.0 / dist) * audioBoost;
+  // Inner particles larger
+  float worldDist = length(pos);
+  float proximityBoost = 1.0 + smoothstep(4.0, 0.0, worldDist) * 2.0;
 
-  // Size modulation based on state
-  float statePulse = 1.0;
-  if(uState > 2.5 && uState < 3.5) {
-    // Responding: pulsing burst
-    statePulse = 1.0 + sin(uTime * 15.0) * 0.4;
-  } else if(uState > 1.5 && uState < 2.5) {
-    // Thinking: rapid flicker
-    statePulse = 1.0 + sin(uTime * 8.0) * 0.2;
-  } else if(uState < 0.5) {
-    // Idle: gentle breathing
-    statePulse = 1.0 + sin(uTime * 1.5) * 0.15;
+  // State-based size
+  float pulse = 1.0;
+  if(uState < 0.5) {
+    // Idle: slow gentle breath
+    pulse = 1.0 + sin(uTime * 1.0) * 0.08;
+  } else if(uState < 1.5) {
+    // Listening: heartbeat pump — particles swell on beat
+    float beat = pow(sin(uTime * 3.5) * 0.5 + 0.5, 6.0);
+    pulse = 0.85 + beat * 0.5; // shrink then pop
+  } else if(uState < 2.5) {
+    // Thinking: tight, compressed, rapid shimmer
+    pulse = 0.8 + sin(uTime * 12.0) * 0.1;
+    proximityBoost *= 1.4; // dense core
+  } else if(uState < 3.5) {
+    // Responding: expanded, radiant, flowing
+    pulse = 1.15 + sin(uTime * 4.0) * 0.15;
+  } else {
+    // Error: flicker
+    pulse = 0.7 + step(0.5, sin(uTime * 20.0) * 0.5 + 0.5) * 0.6;
   }
 
-  // Life-based size (fade out older particles)
-  float lifeSize = 0.5 + vLife * 0.5;
-
-  // Final point size
-  gl_PointSize = baseSize * statePulse * lifeSize;
-
-  // Clamp size to prevent overdraw
-  gl_PointSize = clamp(gl_PointSize, 0.5, 30.0 * audioBoost);
-
+  float lifeSize = 0.3 + vLife * 0.7;
+  gl_PointSize = clamp(baseSize * pulse * lifeSize * proximityBoost, 0.5, 30.0);
   gl_Position = projectionMatrix * mvPosition;
 }

@@ -14,28 +14,33 @@
     <div id="app">
       <canvas id="canvas3d"></canvas>
       
-      <div class="hud">
-        <header class="presence-status">
-          <div class="telemetry-chip">
-            <span class="dot"></span>
-            <span id="presence-mode">SNTNL.MODE.IDLE</span>
+      <div id="mcp-interface" class="hud">
+        <div id="StatusIndicator" class="component">
+          <div class="mcp-signal-indicator">
+            <div class="signal-dot"></div>
+            <span id="presence-mode">SYS.IDLE</span>
           </div>
-          <h1 id="presence-headline">FRIDAY CORE 01</h1>
-          <p id="presence-whisper">AWAITING SEQUENCE DISPATCH</p>
-        </header>
+          <div class="status-text">
+            <h1 id="presence-headline">FRIDAY AI</h1>
+            <p id="presence-whisper">AWAITING SEQUENCE</p>
+          </div>
+        </div>
 
-        <aside class="activity-feed">
-          <div class="glass-panel">
-            <h3>TELEMETRY_FEED</h3>
+        <div id="TelemetryPanel" class="component collapsed">
+          <div class="panel-header">
+            <h3>TELEMETRY</h3>
+            <span class="toggle-icon">></span>
+          </div>
+          <div class="panel-content">
             <div id="feed-list"></div>
           </div>
-        </aside>
+        </div>
 
-        <footer class="command-input">
+        <div id="InputBar" class="component">
           <form id="objective-form">
-            <input type="text" id="objective-input" placeholder="DISPATCH OBJECTIVE..." autocomplete="off" />
+            <input type="text" id="objective-input" placeholder="Awaiting text or voice input..." autocomplete="off" />
           </form>
-        </footer>
+        </div>
       </div>
     </div>
     <script type="module" src="/src/main.js"></script>

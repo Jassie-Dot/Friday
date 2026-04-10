@@ -4,7 +4,6 @@ uniform float uAudio;
 uniform float uState;
 uniform float uEnergy;
 
-// Simplex 3D Noise
 vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
@@ -53,34 +52,13 @@ float snoise(vec3 v) {
   return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
 }
 
-// Curl noise for organic flow
 vec3 curlNoise(vec3 p) {
   const float e = 0.1;
-  float x0 = snoise(p - vec3(e, 0, 0));
-  float x1 = snoise(p + vec3(e, 0, 0));
-  float y0 = snoise(p - vec3(0, e, 0));
-  float y1 = snoise(p + vec3(0, e, 0));
-  float z0 = snoise(p - vec3(0, 0, e));
-  float z1 = snoise(p + vec3(0, 0, e));
   return vec3(
-    (z1 - z0) - (y1 - y0),
-    (x1 - x0) - (z1 - z0),
-    (y1 - y0) - (x1 - x0)
+    snoise(p + vec3(0, 0, e)) - snoise(p - vec3(0, 0, e)) - snoise(p + vec3(0, e, 0)) + snoise(p - vec3(0, e, 0)),
+    snoise(p + vec3(e, 0, 0)) - snoise(p - vec3(e, 0, 0)) - snoise(p + vec3(0, 0, e)) + snoise(p - vec3(0, 0, e)),
+    snoise(p + vec3(0, e, 0)) - snoise(p - vec3(0, e, 0)) - snoise(p + vec3(e, 0, 0)) + snoise(p - vec3(e, 0, 0))
   ) / (2.0 * e);
-}
-
-// Fractal Brownian Motion
-float fbm(vec3 p, int octaves) {
-  float value = 0.0;
-  float amplitude = 0.5;
-  float frequency = 1.0;
-  for(int i = 0; i < 6; i++) {
-    if(i >= octaves) break;
-    value += amplitude * snoise(p * frequency);
-    amplitude *= 0.5;
-    frequency *= 2.0;
-  }
-  return value;
 }
 
 void main() {
@@ -89,104 +67,201 @@ void main() {
   vec3 pos = data.rgb;
   float life = data.a;
 
-  // State-based behavior modifiers
-  float stateTime = uTime * (uState > 1.5 && uState < 2.5 ? 2.5 : 1.0); // Thinking spins faster
-  float burstMultiplier = uState > 2.5 && uState < 3.5 ? 1.8 : 1.0; // Responding bursts
-
-  // === GOLDEN VORTEX CORE ===
-  // Calculate distance and angle from center
   float dist = length(pos);
+  vec3 dir = normalize(pos + vec3(0.001));
   float angle = atan(pos.z, pos.x);
-  float heightFactor = pos.y * 0.15;
+  float elevation = atan(pos.y, length(pos.xz));
 
-  // Spiral galaxy rotation
-  float spiralAngle = angle + stateTime * 0.08 * (uEnergy + 0.3);
-  float spiralRadius = dist * (1.0 + sin(stateTime * 0.3 + dist) * 0.1);
+  // Particle identity (consistent per-particle random)
+  float id = fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453);
+  float id2 = fract(sin(dot(uv, vec2(93.989, 67.345))) * 23456.78);
 
-  // Create the main vortex position
-  vec3 vortex = vec3(
-    cos(spiralAngle) * spiralRadius,
-    heightFactor + sin(stateTime * 0.5 + dist * 0.5) * 0.3,
-    sin(spiralAngle) * spiralRadius
-  );
-
-  // === ORGANIC FLOW ===
-  // Multi-octave curl noise for that WoW magical feel
-  vec3 flow = curlNoise(pos * 0.15 + stateTime * 0.02) * 0.6;
-  flow += curlNoise(pos * 0.4 - stateTime * 0.05) * 0.25;
-  flow += curlNoise(pos * 0.8 + vec3(stateTime * 0.03)) * 0.1;
-
-  // FBM turbulence
-  float turb = fbm(pos * 0.2 + stateTime * 0.01, 4) * 0.4;
-
-  // === STATE-BASED BEHAVIORS ===
-  // Idle: Gentle breathing golden glow
-  // Listening: Energy converges to center, cyan pulses
-  // Thinking: Intense vortex spin, orange sparks
-  // Responding: Explosive golden burst, divine rays
-  // Error: Fragmenting red, chaotic
-
-  vec3 flowDir = normalize(pos);
-  float centerPull = 0.0;
-  float explosiveForce = 0.0;
-
+  // =============================================
+  // IDLE: Solar Prominences
+  // Slow, majestic ribbon-like plasma arcs that
+  // loop up from the surface and fall back down.
+  // Like the surface of the sun.
+  // =============================================
   if(uState < 0.5) {
-    // IDLE: Soft golden breathing
-    centerPull = 0.01 * (1.0 + sin(uTime * 0.8) * 0.5);
-  } else if(uState < 1.5) {
-    // LISTENING: Converging to center
-    centerPull = 0.03 + sin(uTime * 3.0) * 0.02;
-  } else if(uState < 2.5) {
-    // THINKING: Intense spinning
-    centerPull = 0.02;
-  } else if(uState < 3.5) {
-    // RESPONDING: Explosive burst
-    centerPull = -0.02 * burstMultiplier; // Push outward!
-    explosiveForce = 0.15 * burstMultiplier;
-  } else {
-    // ERROR: Chaotic fragmentation
-    centerPull = 0.01;
-    flow += curlNoise(pos * 2.0 + uTime * 0.5) * 0.8;
+    float targetR = 3.0 + sin(uTime * 0.3) * 0.3;
+    pos += dir * (targetR - dist) * 0.01;
+
+    // Solar prominence: particles arc upward along field lines
+    float prominencePhase = sin(angle * 2.0 + uTime * 0.15 + id * 6.28) * 0.5 + 0.5;
+    float arcHeight = prominencePhase * 1.5 * smoothstep(2.5, 4.0, dist);
+    pos.y += arcHeight * 0.008;
+
+    // Slow ribbons flowing along the surface
+    vec3 ribbon = curlNoise(pos * 0.08 + uTime * 0.015) * 0.4;
+    pos += ribbon * 0.025;
+
+    // Gentle equatorial drift
+    float driftAngle = 0.0015;
+    mat2 rot = mat2(cos(driftAngle), -sin(driftAngle), sin(driftAngle), cos(driftAngle));
+    pos.xz = rot * pos.xz;
+
+    // Magnetic field lines: particles follow toroidal paths
+    vec3 toroid = vec3(-pos.y, pos.x * 0.5, 0.0) * 0.006;
+    pos += toroid;
   }
 
-  // Apply center pull/push
-  vortex += flowDir * centerPull;
+  // =============================================
+  // LISTENING: Sonar Pulse Rings
+  // Concentric rings pulse inward toward center
+  // like a radar/sonar ping. Particles compress
+  // into thin bands then release.
+  // =============================================
+  else if(uState < 1.5) {
+    float targetR = 3.2;
+    pos += dir * (targetR - dist) * 0.012;
 
-  // Apply explosive force (increased by audio to create live reaction)
-  vortex += flowDir * (explosiveForce + uAudio * 0.4);
+    // Sonar ring: particles form concentric shells that pulse inward
+    float pingSpeed = 2.5;
+    float pingWavelength = 2.0;
+    float ping = sin(uTime * pingSpeed - dist * pingWavelength);
+    float band = smoothstep(0.7, 1.0, ping); // sharp bands
 
-  // Mix with original position for organic feel
-  pos = mix(pos, vortex, 0.4 + uEnergy * 0.3);
+    // Pull particles into ring bands
+    float ringTarget = floor(dist / 1.2) * 1.2 + 0.6;
+    pos += dir * (ringTarget - dist) * band * 0.04;
 
-  // Apply flow and turbulence
-  pos += flow * (0.02 + uEnergy * 0.03);
+    // Flatten rings slightly
+    pos.y *= 0.995 + band * 0.005;
 
-  // Anti-blob: Strong repulsion from center
-  if(dist < 1.2) {
-    pos += flowDir * 0.08 * (1.2 - dist);
+    // Gentle inward spiral
+    float spiralAngle = 0.004 + band * 0.008;
+    mat2 rot = mat2(cos(spiralAngle), -sin(spiralAngle), sin(spiralAngle), cos(spiralAngle));
+    pos.xz = rot * pos.xz;
+
+    // Subtle surface flow
+    vec3 flow = curlNoise(pos * 0.12 + uTime * 0.04) * 0.15;
+    pos += flow * 0.03;
+
+    // Audio-driven pulse intensity
+    float audioPing = sin(uTime * 6.0 - dist * 3.0) * uAudio * 0.05;
+    pos += dir * audioPing;
   }
 
-  // Gentle orbit rotation (speed up heavily with audio reaction)
-  float orbitAngle = 0.003 + uAudio * 0.08;
-  mat2 rot = mat2(cos(orbitAngle), -sin(orbitAngle), sin(orbitAngle), cos(orbitAngle));
-  pos.xz = rot * pos.xz;
+  // =============================================
+  // THINKING: Electromagnetic Tornado
+  // Particles race in tight helical bands around
+  // Y axis. Core compresses into a dense column.
+  // High-frequency crackling plasma storm.
+  // =============================================
+  else if(uState < 2.5) {
+    // Compress into elongated column
+    float columnRadius = 2.0 + sin(uTime * 1.5) * 0.3;
+    float xzDist = length(pos.xz);
+    pos.xz *= mix(1.0, columnRadius / (xzDist + 0.1), 0.03);
 
-  // Update life
-  life -= 0.001 + (1.0 - uEnergy) * 0.0015;
+    // Stretch vertically
+    pos.y *= 1.003;
+    // But contain height
+    if(abs(pos.y) > 4.0) pos.y *= 0.98;
 
-  // Respawn particles
-  if(life <= 0.0 || dist > 14.0) {
-    // Spawn in dramatic spiral pattern within a smaller radius
-    float spawnAngle = fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453 + uTime * 0.1) * 6.28318;
-    float spawnRadius = 2.0 + fract(sin(dot(uv, vec2(93.989, 67.345))) * 23456.78) * 2.0; // Smaller spawn
-    float spawnHeight = (fract(sin(dot(uv, vec2(45.233, 89.123))) * 34567.89) - 0.5) * 1.5;
+    // Intense helical orbit
+    float helixSpeed = 0.025 + id * 0.01;
+    float helixTilt = sin(pos.y * 0.5 + uTime * 0.5) * 0.003;
+    mat2 rot = mat2(cos(helixSpeed), -sin(helixSpeed), sin(helixSpeed), cos(helixSpeed));
+    pos.xz = rot * pos.xz;
 
-    pos = vec3(
-      cos(spawnAngle) * spawnRadius,
-      spawnHeight,
-      sin(spawnAngle) * spawnRadius
-    );
-    life = 0.7 + fract(sin(dot(uv, vec2(123.456, 789.012))) * 45678.9) * 0.3;
+    // Helical wave along Y axis
+    float helix = sin(pos.y * 3.0 + uTime * 4.0 + angle * 2.0) * 0.04;
+    pos.x += helix;
+    pos.z += cos(pos.y * 3.0 + uTime * 4.0 + angle * 2.0) * 0.04;
+
+    // Electric storm turbulence
+    vec3 storm = curlNoise(pos * 0.5 + uTime * 0.15) * 0.2;
+    storm += curlNoise(pos * 1.2 + uTime * 0.08) * 0.08;
+    pos += storm * 0.06;
+
+    // Crackling: random sharp displacement
+    float crackle = step(0.92, snoise(pos * 2.0 + uTime * 3.0));
+    pos += dir * crackle * 0.15;
+  }
+
+  // =============================================
+  // RESPONDING: Plasma Jets / Solar Wind
+  // Particles stream outward in focused beams from
+  // the poles, creating bi-directional plasma jets.
+  // Equatorial ring expands with voice waves.
+  // =============================================
+  else if(uState < 3.5) {
+    float targetR = 3.5 + sin(uTime * 2.0) * 0.4;
+    pos += dir * (targetR - dist) * 0.01;
+
+    // Polar jet streams: particles near poles shoot outward
+    float polarity = smoothstep(0.3, 1.2, abs(elevation)); // 1 near poles
+    float jetForce = polarity * 0.06;
+    float jetDir = sign(pos.y); // up or down
+    pos.y += jetDir * jetForce;
+
+    // Equatorial expansion waves (voice ripples)
+    float wave = sin(uTime * 5.0 - dist * 2.0) * 0.04;
+    float equatorial = 1.0 - polarity;
+    pos += dir * wave * equatorial;
+
+    // Harmonic interference pattern
+    float wave2 = sin(uTime * 8.0 - dist * 1.5 + 2.0) * 0.02;
+    pos += dir * wave2 * equatorial;
+
+    // Flowing tendrils
+    vec3 flow = curlNoise(pos * 0.15 + uTime * 0.06) * 0.3;
+    pos += flow * 0.04;
+
+    // Moderate orbit
+    float orbitAngle = 0.005;
+    mat2 rot = mat2(cos(orbitAngle), -sin(orbitAngle), sin(orbitAngle), cos(orbitAngle));
+    pos.xz = rot * pos.xz;
+
+    // Audio modulates jet intensity
+    pos.y += sign(pos.y) * uAudio * polarity * 0.08;
+  }
+
+  // =============================================
+  // ERROR: Magnetic Reconnection Event
+  // Core tears apart, particles scatter along
+  // broken field lines, random sharp dislocations.
+  // =============================================
+  else {
+    float targetR = 3.0 + sin(uTime * 8.0) * 1.0;
+    pos += dir * (targetR - dist) * 0.015;
+
+    // Broken field lines: sudden displacement
+    float tearGate = step(0.8, sin(uTime * 25.0) * 0.5 + 0.5);
+    vec3 tear = curlNoise(pos * 3.0 + uTime * 2.0) * 0.4;
+    pos += tear * tearGate * 0.12;
+
+    // Chaotic orbit reversal
+    float flipDir = sign(sin(uTime * 12.0));
+    float orbitAngle = 0.01 * flipDir;
+    mat2 rot = mat2(cos(orbitAngle), -sin(orbitAngle), sin(orbitAngle), cos(orbitAngle));
+    pos.xz = rot * pos.xz;
+  }
+
+  // === GLOBAL: Audio reactivity ===
+  float audioWave = sin(uTime * 8.0 - dist * 3.0) * uAudio * 0.03;
+  pos += dir * audioWave;
+
+  // === Anti-blob ===
+  if(dist < 0.8) {
+    pos += dir * 0.06 * (0.8 - dist);
+  }
+
+  // === Containment ===
+  float newDist = length(pos);
+  if(newDist > 10.0) pos *= 10.0 / newDist;
+
+  // Life
+  life -= 0.0005 + (1.0 - uEnergy) * 0.0006;
+
+  // Respawn
+  if(life <= 0.0 || newDist > 14.0) {
+    float sa = fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453 + uTime * 0.15) * 6.28318;
+    float sr = 1.5 + id2 * 4.0;
+    float sh = (id - 0.5) * 3.0;
+    pos = vec3(cos(sa) * sr, sh, sin(sa) * sr);
+    life = 0.5 + id2 * 0.5;
   }
 
   gl_FragColor = vec4(pos, life);

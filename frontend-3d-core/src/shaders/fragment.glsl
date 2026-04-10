@@ -3,9 +3,14 @@ uniform vec3 uColorB;
 uniform float uTime;
 uniform float uState;
 uniform float uEnergy;
+uniform float uAudio;
 varying float vLife;
+varying float vDist;
 
-// Simplex noise for fragment shader
+float random(vec2 st) {
+  return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+}
+
 vec3 mod289v3(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec4 mod289v4(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec4 permutef(vec4 x) { return mod289v4(((x*34.0)+1.0)*x); }
@@ -54,92 +59,105 @@ float snoise(vec3 v) {
   return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
 }
 
-float random(vec2 st) {
-  return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
-}
-
 void main() {
-  // Distance from center of point
   vec2 center = gl_PointCoord - vec2(0.5);
   float dist = length(center);
-
-  // Discard outside circle
   if(dist > 0.5) discard;
 
-  // === WOOTIAN GLOW ===
-  // Soft inner core
-  float core = exp(-dist * 12.0);
+  // === GLOW LAYERS ===
+  float core = exp(-dist * 16.0);
+  float envelope = exp(-dist * 7.0);
+  float corona = exp(-dist * 3.0);
+  float outerHaze = exp(-dist * 1.5);
 
-  // Medium glow
-  float glow = exp(-dist * 5.0);
-
-  // Outer halo
-  float halo = exp(-dist * 2.5);
-
-  // === STATE-BASED COLORS ===
-  // Transform state index to behavior
-  vec3 baseColor, secondaryColor;
+  // === STATE-SPECIFIC COLORS ===
+  vec3 hotColor = uColorA;
+  vec3 coolColor = uColorB;
+  float brightnessMultiplier = 1.0;
 
   if(uState < 0.5) {
-    // IDLE: Divine Gold to Arcane Purple
-    baseColor = vec3(1.0, 0.84, 0.0); // Gold
-    secondaryColor = vec3(0.61, 0.31, 0.87); // Arcane purple
+    // IDLE: calm cyan + purple
+    brightnessMultiplier = 0.8;
   } else if(uState < 1.5) {
-    // LISTENING: Ethereal Cyan to Silver
-    baseColor = vec3(0.0, 1.0, 1.0); // Cyan
-    secondaryColor = vec3(0.75, 0.75, 0.75); // Silver
+    // LISTENING: brighter, warmer pulse
+    float beat = pow(sin(uTime * 3.5) * 0.5 + 0.5, 6.0);
+    brightnessMultiplier = 0.9 + beat * 0.6;
+    hotColor = mix(uColorA, vec3(0.6, 0.9, 1.0), beat * 0.3);
   } else if(uState < 2.5) {
-    // THINKING: Intense Orange to Crimson
-    baseColor = vec3(1.0, 0.42, 0.0); // Orange
-    secondaryColor = vec3(1.0, 0.0, 0.24); // Crimson
+    // THINKING: electric blue, high energy crackling
+    hotColor = mix(uColorA, vec3(0.3, 0.5, 1.0), 0.4);
+    coolColor = mix(uColorB, vec3(0.1, 0.2, 0.8), 0.3);
+    brightnessMultiplier = 1.2;
   } else if(uState < 3.5) {
-    // RESPONDING: Divine Gold to Pure Light
-    baseColor = vec3(1.0, 0.84, 0.0); // Gold
-    secondaryColor = vec3(1.0, 1.0, 1.0); // White
+    // RESPONDING: bright cyan-green, radiant outward
+    hotColor = mix(uColorA, vec3(0.2, 1.0, 0.8), 0.3);
+    brightnessMultiplier = 1.0 + sin(uTime * 4.0) * 0.15;
   } else {
-    // ERROR: Blood Red to Void
-    baseColor = vec3(0.55, 0.0, 0.0); // Blood red
-    secondaryColor = vec3(0.05, 0.0, 0.05); // Near black
+    // ERROR: red-shifted
+    hotColor = vec3(1.0, 0.1, 0.2);
+    coolColor = vec3(0.5, 0.0, 0.3);
+    float flicker = sin(uTime * 15.0) * 0.5 + 0.5;
+    brightnessMultiplier = 0.5 + flicker * 0.5;
   }
 
-  // Mix colors based on position within particle
-  vec3 color = mix(baseColor, secondaryColor, dist * 2.0);
+  // Depth gradient
+  float depthFade = smoothstep(0.0, 0.45, dist);
+  vec3 color = mix(hotColor, coolColor, depthFade);
 
-  // Add energy crackle effect
-  float crackle = snoise(vec3(gl_PointCoord * 10.0, uTime * 2.0));
-  color += vec3(crackle * 0.1);
+  // === PLASMA TEXTURE ===
+  float plasma = snoise(vec3(gl_PointCoord * 10.0, uTime * 1.5)) * 0.5 + 0.5;
+  float swirl = snoise(vec3(gl_PointCoord * 8.0 - vec2(uTime * 0.8), uTime * 0.5));
+  float hotSpot = pow(plasma, 3.0) * 0.3 * brightnessMultiplier;
+  color += hotColor * hotSpot * core;
 
-  // === MULTI-LAYER GLOW ===
-  // Core brightness
-  float coreBrightness = core * 1.5;
+  // Energy crackle (stronger during thinking)
+  float crackleScale = uState > 1.5 && uState < 2.5 ? 20.0 : 15.0;
+  float crackleSpeed = uState > 1.5 && uState < 2.5 ? 5.0 : 3.0;
+  float crackle = snoise(vec3(gl_PointCoord * crackleScale, uTime * crackleSpeed));
+  float crackleIntensity = smoothstep(0.4, 0.9, abs(crackle)) * 0.12;
+  color += hotColor * crackleIntensity;
 
-  // Outer glow intensity
-  float glowIntensity = glow * 0.6;
+  // === ELECTRIC ARC LINES (thinking state) ===
+  if(uState > 1.5 && uState < 2.5) {
+    float arc = abs(sin(gl_PointCoord.x * 30.0 + uTime * 8.0 + gl_PointCoord.y * 20.0));
+    arc = pow(arc, 12.0) * 0.4;
+    color += vec3(0.5, 0.7, 1.0) * arc * core;
+  }
 
-  // Combine
-  vec3 finalColor = color * (coreBrightness + glowIntensity);
+  // === COMPOSITE ===
+  float coreBright = core * 0.5 * brightnessMultiplier;
+  float envBright = envelope * 0.25 * brightnessMultiplier;
+  float coroBright = corona * 0.1;
+  float hazeBright = outerHaze * 0.03;
 
-  // Add chromatic aberration at edges
-  float chromatic = sin(dist * 20.0 + uTime) * 0.05;
-  finalColor.r += chromatic;
+  vec3 finalColor = color * (coreBright + envBright + coroBright + hazeBright);
+
+  // Chromatic dispersion
+  float chromatic = sin(dist * 30.0 + uTime * 3.0) * 0.02;
+  finalColor.r += chromatic * 0.8;
   finalColor.b -= chromatic;
 
-  // === LIFE-BASED EFFECTS ===
-  // Fade out older particles
-  float alpha = (core * 0.8 + glow * 0.4) * vLife;
+  // === LIFE EFFECTS ===
+  float alpha = (core * 0.7 + envelope * 0.3 + corona * 0.15) * (vLife * 0.6);
 
-  // Boost brightness for fresh particles
   if(vLife > 0.8) {
-    finalColor *= 1.0 + (vLife - 0.8) * 2.0;
+    float fresh = (vLife - 0.8) * 2.0;
+    finalColor += hotColor * fresh * 0.2;
+    alpha *= 1.0 + fresh * 0.3;
+  }
+  if(vLife < 0.25) {
+    float dying = (0.25 - vLife) / 0.25;
+    finalColor = mix(finalColor, coolColor * 0.2, dying * 0.5);
   }
 
-  // === DIVINE SPARKLE ===
-  // Random twinkling for star-like effect
-  float sparkle = step(0.995, random(gl_PointCoord + uTime * 0.1));
-  finalColor += vec3(sparkle * 2.0);
+  // Sparkle
+  float sparkle = step(0.993, random(gl_PointCoord + uTime * 0.03));
+  finalColor += vec3(sparkle * 0.3) * hotColor;
 
-  // Clamp final output
-  finalColor = clamp(finalColor, 0.0, 1.0);
+  // Depth fog
+  float fog = smoothstep(4.0, 15.0, vDist);
+  finalColor = mix(finalColor, coolColor * 0.03, fog * 0.4);
 
+  finalColor = clamp(finalColor, 0.0, 0.85);
   gl_FragColor = vec4(finalColor, alpha);
 }
