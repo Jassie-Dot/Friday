@@ -4,14 +4,23 @@ import { GPUComputationRenderer } from 'three-stdlib';
 import { EffectComposer } from 'three-stdlib';
 import { RenderPass } from 'three-stdlib';
 import { UnrealBloomPass } from 'three-stdlib';
+import { ShaderPass } from 'three-stdlib';
 
 // Shaders
 import simShader from './shaders/simulation.glsl';
 import vertShader from './shaders/vertex.glsl';
 import fragShader from './shaders/fragment.glsl';
+import nebulaVertShader from './shaders/nebula.vert.glsl';
+import nebulaFragShader from './shaders/nebula.glsl';
+import godraysVertShader from './shaders/godrays.vert.glsl';
+import godraysFragShader from './shaders/godrays.glsl';
+
+// Effects
+import { WispsSystem } from './wisps.js';
+import { EffectsComposer } from './effects.js';
 
 // Constants
-const SIZE = 512; // 512x512 = 262,144 particles
+const SIZE = 512;
 const API_URL = import.meta.env.VITE_FRIDAY_API_URL || "http://127.0.0.1:8000";
 const WS_URL = API_URL.replace(/^http/, "ws") + "/ws/presence";
 
@@ -19,8 +28,9 @@ const WS_URL = API_URL.replace(/^http/, "ws") + "/ws/presence";
 let currentPresence = { mode: 'idle', energy: 0.15 };
 let audioLevel = 0;
 let scene, camera, renderer, composer, gpuCompute, posVariable;
-let particleSystem;
-const clock = new THREE.Clock();
+let particleSystem, nebulaPlane, wispsSystem;
+let clock = new THREE.Clock();
+let mouse = new THREE.Vector2(0.5, 0.5);
 
 // UI Elements
 const presenceModeEl = document.getElementById('presence-mode');
@@ -35,8 +45,8 @@ init();
 async function init() {
   // Scene Setup
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.z = 12;
+  camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.z = 10;
 
   renderer = new THREE.WebGLRenderer({
     canvas: document.getElementById('canvas3d'),
@@ -46,6 +56,11 @@ async function init() {
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.2;
+
+  // Nebula Background
+  initNebula();
 
   // GPGPU Setup
   initComputeRenderer();
@@ -53,13 +68,17 @@ async function init() {
   // Particles Setup
   initParticles();
 
+  // Wisps System
+  wispsSystem = new WispsSystem(scene, currentPresence);
+
   // Post Processing
   initPostProcessing();
 
   // Events
   window.addEventListener('resize', onWindowResize);
+  window.addEventListener('mousemove', onMouseMove);
   formEl.addEventListener('submit', handleFormSubmit);
-  
+
   // Audio & Socket
   setupAudio();
   connectWebSocket();
@@ -68,21 +87,44 @@ async function init() {
   animate();
 }
 
+function initNebula() {
+  const nebulaGeometry = new THREE.PlaneGeometry(30, 20);
+  const nebulaMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+      uMouse: { value: new THREE.Vector2(0.5, 0.5) }
+    },
+    vertexShader: nebulaVertShader,
+    fragmentShader: nebulaFragShader,
+    depthWrite: false,
+    depthTest: false
+  });
+
+  nebulaPlane = new THREE.Mesh(nebulaGeometry, nebulaMaterial);
+  nebulaPlane.position.z = -15;
+  nebulaPlane.renderOrder = -1;
+  scene.add(nebulaPlane);
+}
+
 function initComputeRenderer() {
   gpuCompute = new GPUComputationRenderer(SIZE, SIZE, renderer);
 
   const dtPosition = gpuCompute.createTexture();
   const positionData = dtPosition.image.data;
 
-  // Initial Positions (Random Sphere)
+  // Initial Positions - Dramatic spiral pattern
   for (let i = 0; i < positionData.length; i += 4) {
-    const r = 4 + Math.random() * 4;
+    const r = 3 + Math.random() * 5;
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(2 * Math.random() - 1);
-    positionData[i + 0] = r * Math.sin(phi) * Math.cos(theta);
-    positionData[i + 1] = r * Math.cos(phi);
-    positionData[i + 2] = r * Math.sin(phi) * Math.sin(theta);
-    positionData[i + 3] = Math.random(); // Life
+
+    // Spiral distribution
+    const spiralAngle = theta + r * 0.3;
+    positionData[i + 0] = r * Math.sin(phi) * Math.cos(spiralAngle);
+    positionData[i + 1] = r * Math.cos(phi) * 0.5;
+    positionData[i + 2] = r * Math.sin(phi) * Math.sin(spiralAngle);
+    positionData[i + 3] = 0.5 + Math.random() * 0.5; // Life
   }
 
   posVariable = gpuCompute.addVariable('uCurrentPos', simShader, dtPosition);
@@ -118,9 +160,12 @@ function initParticles() {
   const material = new THREE.ShaderMaterial({
     uniforms: {
       uPosTexture: { value: null },
-      uColorA: { value: new THREE.Color('#4ef5d2') },
-      uColorB: { value: new THREE.Color('#9d4edd') },
-      uSize: { value: 1.8 } // Smaller particles
+      uColorA: { value: new THREE.Color(0xFFD700) },
+      uColorB: { value: new THREE.Color(0x9D4EDD) },
+      uSize: { value: 2.0 },
+      uTime: { value: 0 },
+      uState: { value: 0 },
+      uEnergy: { value: 0.15 }
     },
     vertexShader: vertShader,
     fragmentShader: fragShader,
@@ -130,21 +175,12 @@ function initParticles() {
   });
 
   particleSystem = new THREE.Points(geometry, material);
+  particleSystem.position.z = 0;
   scene.add(particleSystem);
 }
 
 function initPostProcessing() {
-  const renderScene = new RenderPass(scene, camera);
-  const bloomPass = new UnrealBloomPass(
-    new THREE.Vector2(window.innerWidth, window.innerHeight),
-    0.6, // Drastically reduced from 1.5
-    0.5, // Radius
-    0.9 // Threshold
-  );
-
-  composer = new EffectComposer(renderer);
-  composer.addPass(renderScene);
-  composer.addPass(bloomPass);
+  composer = new EffectsComposer(renderer, scene, camera);
 }
 
 function animate() {
@@ -153,21 +189,48 @@ function animate() {
   const delta = clock.getDelta();
   const elapsed = clock.getElapsedTime();
 
+  const stateIdx = getStateIndex(currentPresence.mode);
+
   // Update GPGPU
   posVariable.material.uniforms.uTime.value = elapsed;
   posVariable.material.uniforms.uDelta.value = delta;
   posVariable.material.uniforms.uAudio.value = audioLevel;
-  posVariable.material.uniforms.uState.value = getStateIndex(currentPresence.mode);
+  posVariable.material.uniforms.uState.value = stateIdx;
   posVariable.material.uniforms.uEnergy.value = currentPresence.energy;
 
   gpuCompute.compute();
 
   // Update Particle Material
   particleSystem.material.uniforms.uPosTexture.value = gpuCompute.getCurrentRenderTarget(posVariable).texture;
+  particleSystem.material.uniforms.uTime.value = elapsed;
+  particleSystem.material.uniforms.uState.value = stateIdx;
+  particleSystem.material.uniforms.uEnergy.value = currentPresence.energy;
 
-  // Smooth Rotation
-  particleSystem.rotation.y += 0.002 + (audioLevel * 0.05);
-  particleSystem.rotation.x += 0.001;
+  // Update colors based on state
+  const colors = getStateColors(currentPresence.mode);
+  particleSystem.material.uniforms.uColorA.value = colors.primary;
+  particleSystem.material.uniforms.uColorB.value = colors.secondary;
+
+  // Dynamic rotation based on state
+  let rotSpeed = 0.003;
+  if (stateIdx === 1) rotSpeed = 0.006; // Listening - faster
+  if (stateIdx === 2) rotSpeed = 0.012; // Thinking - intense
+  if (stateIdx === 3) rotSpeed = 0.008; // Responding - burst
+
+  particleSystem.rotation.y += rotSpeed + (audioLevel * 0.03);
+  particleSystem.rotation.x += rotSpeed * 0.5;
+
+  // Update nebula
+  if (nebulaPlane) {
+    nebulaPlane.material.uniforms.uTime.value = elapsed;
+    nebulaPlane.material.uniforms.uMouse.value = mouse;
+  }
+
+  // Update wisps
+  wispsSystem.update(currentPresence, delta);
+
+  // Update effects
+  composer.updateTime(elapsed);
 
   composer.render();
 }
@@ -175,6 +238,23 @@ function animate() {
 function getStateIndex(mode) {
   const map = { idle: 0, listening: 1, thinking: 2, responding: 3, error: 4 };
   return map[mode] ?? 0;
+}
+
+function getStateColors(mode) {
+  switch(mode) {
+    case 'idle':
+      return { primary: new THREE.Color(0xFFD700), secondary: new THREE.Color(0x9D4EDD) };
+    case 'listening':
+      return { primary: new THREE.Color(0x00FFFF), secondary: new THREE.Color(0xC0C0C0) };
+    case 'thinking':
+      return { primary: new THREE.Color(0xFF6B00), secondary: new THREE.Color(0xFF003C) };
+    case 'responding':
+      return { primary: new THREE.Color(0xFFD700), secondary: new THREE.Color(0xFFFFFF) };
+    case 'error':
+      return { primary: new THREE.Color(0x8B0000), secondary: new THREE.Color(0x000000) };
+    default:
+      return { primary: new THREE.Color(0xFFD700), secondary: new THREE.Color(0x9D4EDD) };
+  }
 }
 
 // System Integrations
@@ -203,7 +283,7 @@ async function setupAudio() {
 
 function connectWebSocket() {
   const socket = new WebSocket(WS_URL);
-  
+
   socket.onmessage = (event) => {
     const payload = JSON.parse(event.data);
     if (payload.type === 'presence' || payload.type === 'bootstrap') {
@@ -223,10 +303,6 @@ function updatePresenceUI(presence) {
   presenceModeEl.textContent = `CORE: ${presence.mode.toUpperCase()}`;
   presenceHeadlineEl.textContent = presence.headline || "FRIDAY 3D";
   presenceWhisperEl.textContent = presence.whisper || "Ready for core dispatch";
-  
-  // Dynamic colors based on energy
-  const primaryColor = new THREE.Color('#4ef5d2').lerp(new THREE.Color('#ff003c'), presence.energy * 0.5);
-  particleSystem.material.uniforms.uColorA.value = primaryColor;
 }
 
 function pushEvent(event) {
@@ -241,10 +317,10 @@ async function handleFormSubmit(e) {
   e.preventDefault();
   const objective = inputEl.value.trim();
   if (!objective) return;
-  
+
   inputEl.value = "";
   inputEl.placeholder = "DISPATCHING...";
-  
+
   try {
     await fetch(`${API_URL}/api/objectives/submit`, {
       method: "POST",
@@ -263,4 +339,13 @@ function onWindowResize() {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   composer.setSize(window.innerWidth, window.innerHeight);
+
+  if (nebulaPlane) {
+    nebulaPlane.material.uniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
+  }
+}
+
+function onMouseMove(e) {
+  mouse.x = e.clientX / window.innerWidth;
+  mouse.y = 1.0 - e.clientY / window.innerHeight;
 }
