@@ -1,0 +1,154 @@
+:root {
+  color-scheme: dark;
+  --bg0: #04070d;
+  --bg1: #07131f;
+  --ink: #ebfbff;
+  --muted: rgba(210, 240, 245, 0.7);
+  --accent: #7fe6d4;
+  --accent2: #65b4ff;
+  --error: #ff7a93;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(101, 180, 255, 0.16), transparent 28%),
+    radial-gradient(circle at 80% 15%, rgba(127, 230, 212, 0.12), transparent 24%),
+    linear-gradient(180deg, var(--bg1) 0%, var(--bg0) 100%);
+  font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
+}
+
+canvas {
+  display: block;
+}
+
+.hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.headline {
+  position: absolute;
+  left: 32px;
+  top: 28px;
+  max-width: min(560px, 70vw);
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  font-size: 0.72rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.headline h1 {
+  margin: 0;
+  font-size: clamp(2.2rem, 5vw, 4.8rem);
+  line-height: 0.92;
+  font-weight: 700;
+}
+
+.headline p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: clamp(0.95rem, 1.7vw, 1.2rem);
+}
+
+.statusline {
+  position: absolute;
+  left: 32px;
+  bottom: 118px;
+  color: var(--muted);
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+}
+
+.commandline {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-radius: 999px;
+  background: rgba(5, 15, 22, 0.42);
+  border: 1px solid rgba(127, 230, 212, 0.14);
+  backdrop-filter: blur(18px);
+  pointer-events: auto;
+}
+
+.commandline span {
+  color: rgba(127, 230, 212, 0.92);
+  font-size: 0.82rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.commandline input {
+  flex: 1;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.commandline input::placeholder {
+  color: rgba(210, 240, 245, 0.38);
+}
+
+.note {
+  position: absolute;
+  right: 32px;
+  bottom: 118px;
+  color: rgba(210, 240, 245, 0.55);
+  font-size: 0.9rem;
+  text-align: right;
+  max-width: 360px;
+}
+
+@media (max-width: 720px) {
+  .headline,
+  .statusline,
+  .note {
+    left: 18px;
+    right: 18px;
+  }
+
+  .headline {
+    top: 18px;
+  }
+
+  .note {
+    bottom: 132px;
+    text-align: left;
+  }
+
+  .statusline {
+    bottom: 98px;
+  }
+
+  .commandline {
+    left: 14px;
+    right: 14px;
+    bottom: 14px;
+  }
+
+  .commandline span {
+    display: none;
+  }
+}

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FRIDAY Control Deck</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="grid"></div>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">LOCAL AUTONOMOUS SYSTEM</p>
+        <h1>FRIDAY</h1>
+        <p class="lede">A multi-agent local AI that plans, acts, searches the web, remembers outcomes, and improves from its own execution logs.</p>
+      </div>
+      <div class="status-card">
+        <div class="status-line">
+          <span>System Status</span>
+          <strong id="health-status">Checking</strong>
+        </div>
+        <div class="status-line">
+          <span>Primary Model</span>
+          <strong id="primary-model">Unknown</strong>
+        </div>
+        <div class="status-line">
+          <span>Fast Model</span>
+          <strong id="fast-model">Unknown</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Objective Runner</h2>
+        <p>Send a high-level goal and let FRIDAY decompose it into agent steps.</p>
+      </div>
+      <form id="task-form">
+        <textarea id="objective" placeholder="Example: Search for local speech-to-text libraries, compare them, and summarize the best option for offline deployment."></textarea>
+        <button type="submit">Run Objective</button>
+      </form>
+      <pre id="task-output">No task has been executed yet.</pre>
+    </section>
+
+    <section class="columns">
+      <article class="panel">
+        <div class="panel-header">
+          <h2>Recent Tasks</h2>
+          <p>In-memory execution history for this running session.</p>
+        </div>
+        <div id="task-list" class="list"></div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <h2>Agent Activity</h2>
+          <p>Structured JSON events emitted during planning and execution.</p>
+        </div>
+        <div id="event-list" class="list"></div>
+      </article>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
