@@ -36,18 +36,19 @@ class LocalLLM(ABC):
 
 
 def _extract_json_blob(text: str) -> str:
-    stripped = text.strip()
-    if stripped.startswith("{") or stripped.startswith("["):
-        return stripped
-    match = re.search(r"(\{.*\}|\[.*\])", stripped, re.DOTALL)
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    if cleaned.startswith("{") or cleaned.startswith("["):
+        return cleaned
+    match = re.search(r"(\{.*\}|\[.*\])", cleaned, re.DOTALL)
     if not match:
         raise ValueError("No JSON object found in model response.")
     return match.group(1)
 
 
 class OllamaClient(LocalLLM):
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, model: str | None = None) -> None:
         self.settings = settings
+        self.default_model = model or settings.primary_model
         self._client = httpx.AsyncClient(base_url=settings.ollama_base_url, timeout=120.0)
 
     async def chat(
@@ -62,7 +63,7 @@ class OllamaClient(LocalLLM):
             for message in messages
         ]
         payload: dict[str, Any] = {
-            "model": model or self.settings.primary_model,
+            "model": model or self.default_model,
             "messages": normalized,
             "stream": False,
             "options": {
@@ -74,7 +75,10 @@ class OllamaClient(LocalLLM):
 
         response = await self._client.post("/api/chat", json=payload)
         response.raise_for_status()
-        return response.json()["message"]["content"]
+        raw_content = response.json()["message"]["content"]
+        # Strip thinking tags from reasoning models
+        cleaned = re.sub(r"<think>.*?</think>", "", raw_content, flags=re.DOTALL).strip()
+        return cleaned
 
     async def json_response(
         self,

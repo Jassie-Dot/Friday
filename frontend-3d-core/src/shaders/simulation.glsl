@@ -215,7 +215,7 @@ void main() {
     pos.xz = rot * pos.xz;
 
     // Audio modulates jet intensity
-    pos.y += sign(pos.y) * uAudio * polarity * 0.08;
+    pos.y += sign(pos.y + 0.00001) * uAudio * polarity * 0.08;
   }
 
   // =============================================

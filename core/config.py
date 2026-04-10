@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     logs_root: Path = Field(default_factory=lambda: Path.cwd() / "logs")
     log_level: str = "INFO"
 
-    frontend_mode: FrontendMode = FrontendMode.particles
+    frontend_mode: FrontendMode = FrontendMode.three_d_core
     particles_host: str = "127.0.0.1"
     particles_port: int = 5173
     antigravity_host: str = "127.0.0.1"

@@ -22,6 +22,7 @@ class AgentName(str, Enum):
     system = "system"
     vision = "vision"
     voice = "voice"
+    chat = "chat"
 
 
 class TaskStatus(str, Enum):
@@ -51,6 +52,7 @@ class PresenceMode(str, Enum):
 class FrontendMode(str, Enum):
     particles = "particles"
     antigravity = "antigravity"
+    three_d_core = "3d-core"
 
 
 class MemoryHit(BaseModel):
@@ -124,6 +126,7 @@ class PresenceSnapshot(BaseModel):
     audio_level: float = 0.0
     energy: float = 0.15
     frontend_mode: FrontendMode = FrontendMode.particles
+    terminal_text: str = ""
     updated_at: datetime = Field(default_factory=utc_now)
 
 

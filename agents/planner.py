@@ -20,28 +20,30 @@ class PlannerAgent(BaseAgent):
             "context": context.task_context,
             "memories": [memory.model_dump() for memory in context.memories[:5]],
             "available_agents": [
-                {"name": "executor", "best_for": "code execution, shell, files, python"},
-                {"name": "web", "best_for": "internet search, scraping, summarization"},
+                {"name": "chat", "best_for": "greetings, questions, explanations, conversation, general knowledge"},
+                {"name": "executor", "best_for": "code execution, shell commands, file operations, python scripts"},
+                {"name": "web", "best_for": "internet search, scraping, summarization of web pages"},
                 {"name": "vision", "best_for": "image generation and editing"},
-                {"name": "voice", "best_for": "speech to text and text to speech"},
-                {"name": "system", "best_for": "browser control, os actions, automation"},
+                {"name": "voice", "best_for": "speech to text transcription and text to speech synthesis"},
+                {"name": "system", "best_for": "browser control, OS actions, app launching, automation"},
             ],
         }
         try:
-            result = await self.llm.json_response(
+            result = await self.fast_llm.json_response(
                 [
                     {
                         "role": "system",
                         "content": (
                             "You are the planner for FRIDAY. Return JSON only with "
-                            '{"reasoning":"...", "steps":[{"title":"...", "agent":"executor|web|vision|voice|system", '
+                            '{"reasoning":"...", "steps":[{"title":"...", "agent":"chat", '
                             '"goal":"...", "inputs":{}, "expected_output":"..."}]}. '
+                            "The 'agent' MUST be exactly one of: chat, executor, web, vision, voice, system. "
+                            "Use 'chat' for greetings, questions, general conversation, and explanations. "
                             "Keep the plan concrete, safe, and under 8 steps."
                         ),
                     },
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=True)},
-                ],
-                model=self.llm.settings.fast_model,
+                ]
             )
             plan = TaskPlan(
                 objective=context.objective,
@@ -70,12 +72,15 @@ class PlannerAgent(BaseAgent):
         steps: list[TaskStep] = []
         if any(token in lower for token in ("search", "research", "scrape", "web", "internet", "browse")):
             steps.append(TaskStep(title="Gather web intelligence", agent=AgentName.web, goal=objective, inputs={"query": objective}, expected_output="Web findings and source-aware summary."))
-        if any(token in lower for token in ("image", "visual", "art", "render")):
+        if any(token in lower for token in ("image", "visual", "art", "render", "draw", "picture")):
             steps.append(TaskStep(title="Generate image output", agent=AgentName.vision, goal=objective, inputs={"prompt": objective}, expected_output="Generated image files."))
-        if any(token in lower for token in ("voice", "audio", "speech", "transcribe", "speak")):
+        if any(token in lower for token in ("transcribe", "dictation", "record audio")):
             steps.append(TaskStep(title="Handle voice task", agent=AgentName.voice, goal=objective, inputs={}, expected_output="Voice transcription or speech output."))
-        if any(token in lower for token in ("browser", "open", "file", "folder", "app", "automation")):
+        if any(token in lower for token in ("browser", "open app", "launch", "automation")):
             steps.append(TaskStep(title="Perform system action", agent=AgentName.system, goal=objective, inputs={}, expected_output="OS action completed safely."))
-        if not steps:
+        if any(token in lower for token in ("run", "execute", "script", "code", "compile", "build", "install")):
             steps.append(TaskStep(title="Execute local task", agent=AgentName.executor, goal=objective, inputs={}, expected_output="Objective completed locally."))
+        if not steps:
+            # Default: treat as conversational
+            steps.append(TaskStep(title="Respond to user", agent=AgentName.chat, goal=objective, inputs={}, expected_output="A helpful conversational response."))
         return TaskPlan(objective=objective, reasoning="Heuristic fallback plan generated without model output.", steps=steps)

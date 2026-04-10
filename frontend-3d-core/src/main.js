@@ -27,7 +27,9 @@ let bolts = []; // Lightning bolt pool
 const presenceModeEl = document.getElementById('presence-mode');
 const presenceHeadlineEl = document.getElementById('presence-headline');
 const presenceWhisperEl = document.getElementById('presence-whisper');
+const terminalOutputEl = document.getElementById('terminal-output');
 const feedListEl = document.getElementById('feed-list');
+const micToggleBtn = document.getElementById('mic-toggle');
 const formEl = document.getElementById('objective-form');
 const inputEl = document.getElementById('objective-input');
 
@@ -262,17 +264,26 @@ async function init() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
 
-  initComputeRenderer();
-  initParticles();
-  initLightningPool();
-  composer = new EffectsComposer(renderer, scene, camera);
+  try {
+    if (document.getElementById('canvas3d')) {
+      initComputeRenderer();
+      initParticles();
+      initLightningPool();
+      composer = new EffectsComposer(renderer, scene, camera);
+    }
 
-  window.addEventListener('resize', onWindowResize);
-  formEl.addEventListener('submit', handleFormSubmit);
+    window.addEventListener('resize', onWindowResize);
+    if (formEl) formEl.addEventListener('submit', handleFormSubmit);
 
-  setupAudio();
-  connectWebSocket();
-  animate();
+    setupAudio();
+    connectWebSocket();
+    initVoiceSystem();
+    animate();
+  } catch (err) {
+    console.error('Critical initialization failure', err);
+    // Attempt to run animation loop even if some systems fail
+    if (particleSystem) animate();
+  }
 }
 
 function initComputeRenderer() {
@@ -383,8 +394,17 @@ function animate() {
   // Update lightning bolts
   updateLightning(delta, stateIdx);
 
-  composer.updateTime(elapsed);
-  composer.render();
+  if (composer) {
+    try {
+      composer.updateTime(elapsed);
+      composer.render();
+    } catch (e) {
+      console.warn('Post-processing failed, falling back to base render', e);
+      renderer.render(scene, camera);
+    }
+  } else {
+    renderer.render(scene, camera);
+  }
 }
 
 // ===============================================
@@ -425,8 +445,143 @@ async function setupAudio() {
     };
     update();
   } catch (e) {
-    console.warn('Audio unavailable', e);
+    console.warn('Audio visualization unavailable', e);
   }
+}
+
+function typewriterEffect(element, text) {
+  if (!element || !text) return;
+  element.innerHTML = "";
+  let i = 0;
+  const speed = 15; // ms per char
+
+  // Clear any existing intervals
+  if (element._typeInterval) clearInterval(element._typeInterval);
+
+  element._typeInterval = setInterval(() => {
+    if (i < text.length) {
+      element.innerHTML += text.charAt(i);
+      i++;
+      // Auto-scroll logic if needed
+    } else {
+      clearInterval(element._typeInterval);
+    }
+  }, speed);
+}
+
+// ===============================================
+// VOICE SYSTEM (STT / TTS)
+// ===============================================
+let recognition;
+let isListening = false;
+let synth = window.speechSynthesis;
+
+function initVoiceSystem() {
+  if (!synth || !micToggleBtn) return;
+  // 1. Setup Synthesis
+  // Warm up voices
+  try {
+    synth.getVoices();
+  } catch (e) { console.warn('Speech synthesis voices unavailable', e); }
+
+  // 2. Setup Recognition
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SpeechRecognition) {
+    recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => {
+      isListening = true;
+      micToggleBtn.classList.add('active');
+      currentPresence.mode = 'listening';
+      if (presenceModeEl) presenceModeEl.textContent = 'CORE: LISTENING';
+    };
+
+    recognition.onresult = (event) => {
+      let interimTranscript = '';
+      let finalTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+
+      if (presenceWhisperEl) {
+        presenceWhisperEl.textContent = finalTranscript || interimTranscript || "Hearing...";
+      }
+      
+      if (finalTranscript) {
+        inputEl.value = finalTranscript;
+        handleFormSubmit({ preventDefault: () => {} });
+      }
+    };
+
+    recognition.onerror = (event) => {
+      console.error('Speech recognition error', event.error);
+      stopListening();
+    };
+
+    recognition.onend = () => {
+      stopListening();
+    };
+  } else {
+    micToggleBtn.style.display = 'none';
+    console.warn('Speech Recognition not supported in this browser.');
+  }
+
+  micToggleBtn.addEventListener('click', () => {
+    if (isListening) stopListening();
+    else startListening();
+  });
+}
+
+function startListening() {
+  try {
+    recognition.start();
+  } catch (e) { console.error(e); }
+}
+
+function stopListening() {
+  isListening = false;
+  micToggleBtn.classList.remove('active');
+  if (recognition) recognition.stop();
+  // Restore state will happen via WebSocket update usually
+}
+
+function speakText(text) {
+  if (!text || !synth) return;
+  
+  // Cancel any ongoing speech
+  synth.cancel();
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  
+  // Try to find a professional sounding voice
+  const voices = synth.getVoices();
+  // Prefer "Google UK English Male" or "Microsoft David" or high-quality locals
+  const preferredVoice = voices.find(v => v.name.includes('UK English Male')) || 
+                        voices.find(v => v.name.includes('Google')) ||
+                        voices[0];
+  
+  if (preferredVoice) utterance.voice = preferredVoice;
+  
+  utterance.pitch = 0.9; // Slightly deeper, professional
+  utterance.rate = 1.0;
+
+  utterance.onstart = () => {
+    currentPresence.mode = 'responding';
+  };
+
+  utterance.onend = () => {
+    // Return to idle unless another state is active
+  };
+
+  synth.speak(utterance);
 }
 
 function connectWebSocket() {
@@ -440,6 +595,14 @@ function connectWebSocket() {
         if (presenceModeEl) presenceModeEl.textContent = `CORE: ${data.mode.toUpperCase()}`;
         if (presenceHeadlineEl) presenceHeadlineEl.textContent = data.headline || "FRIDAY AI";
         if (presenceWhisperEl) presenceWhisperEl.textContent = data.whisper || "Ready";
+        
+        if (data.terminal_text && terminalOutputEl) {
+          typewriterEffect(terminalOutputEl, data.terminal_text);
+          // Only speak if it's a "fresh" terminal text that's significant
+          if (data.mode === 'responding') {
+            speakText(data.terminal_text);
+          }
+        }
       }
       if (payload.type === 'event' && feedListEl) {
         const item = document.createElement('div');

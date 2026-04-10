@@ -26,7 +26,8 @@ class FridayRuntime:
         self.realtime = RealtimeHub(settings.frontend_mode)
         self.events.subscribe(self.realtime.record_event)
 
-        self.llm = OllamaClient(settings)
+        self.llm = OllamaClient(settings, model=settings.primary_model)
+        self.fast_llm = OllamaClient(settings, model=settings.fast_model)
         self.policy = PermissionPolicy(settings)
         self.memory = MemoryStore(settings, build_embedding_provider(settings))
         self.tools = ToolRegistry(settings, self.policy)
@@ -34,6 +35,7 @@ class FridayRuntime:
         self.system = SystemController(self.tools)
         self.agents = AgentRegistry(
             llm=self.llm,
+            fast_llm=self.fast_llm,
             memory=self.memory,
             tools=self.tools,
             events=self.events,

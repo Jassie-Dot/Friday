@@ -82,7 +82,8 @@ class FridayOrchestrator:
             mode=PresenceMode.thinking,
             headline="Planning objective",
             whisper=request.objective,
-            active_agents=[AgentName.planner.value],
+            terminal_text="ANALYZING MISSION PARAMETERS...",
+            active_agents=[AgentName.planner],
             current_objective=request.objective,
             energy=0.45,
         )
@@ -112,22 +113,42 @@ class FridayOrchestrator:
 
         for step in plan.steps:
             step.status = StepStatus.running
+            
+            # Set presence based on agent type
+            presence_mode = PresenceMode.thinking
+            if step.agent == AgentName.chat:
+                presence_mode = PresenceMode.responding
+            
             await self.realtime.set_presence(
-                mode=PresenceMode.thinking,
+                mode=presence_mode,
                 headline=f"{step.agent.value.title()} agent active",
                 whisper=step.title,
-                active_agents=[step.agent.value],
+                active_agents=[step.agent],
                 current_objective=request.objective,
-                energy=0.6,
+                energy=0.8 if step.agent == AgentName.chat else 0.6,
             )
             response = await self._run_step(record, request, step, memories)
+            
+            if response.success:
+                # Update terminal with the step output if it's meaningful
+                await self.realtime.set_presence(
+                    mode=presence_mode,
+                    headline=f"{step.agent.value.title()} agent active",
+                    whisper=step.title,
+                    terminal_text=response.summary,
+                    active_agents=[step.agent],
+                    current_objective=request.objective,
+                    energy=0.5,
+                )
+
             if not response.success:
                 record.status = TaskStatus.failed
                 await self.realtime.set_presence(
                     mode=PresenceMode.error,
                     headline="Execution fault",
-                    whisper=response.error or response.summary,
-                    active_agents=[AgentName.debug.value],
+                    whisper=step.title,
+                    terminal_text=response.error or response.summary,
+                    active_agents=[AgentName.debug],
                     current_objective=request.objective,
                     energy=0.95,
                 )
@@ -135,16 +156,28 @@ class FridayOrchestrator:
 
         if record.status != TaskStatus.failed:
             record.status = TaskStatus.completed
+            
+            # FAST PATH: If the task was a single-step chat, skip the expensive summary step
+            if len(plan.steps) == 1 and plan.steps[0].agent == AgentName.chat:
+                summary = record.steps[0].output_summary
+            else:
+                summary = await self._summarize(record)
+                
+            record.summary = summary
+            
             await self.realtime.set_presence(
                 mode=PresenceMode.responding,
                 headline="Objective completed",
                 whisper=request.objective,
+                terminal_text=summary,
                 active_agents=[],
                 current_objective=request.objective,
                 energy=0.35,
             )
 
-        record.summary = await self._summarize(record)
+        if not record.summary:
+            record.summary = await self._summarize(record)
+            
         if request.store_memory:
             record.learning_note = await self._learning_note(record)
         record.updated_at = utc_now()

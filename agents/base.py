@@ -42,16 +42,19 @@ class BaseAgent(ABC):
     def __init__(
         self,
         llm: OllamaClient,
+        fast_llm: OllamaClient,
         memory: MemoryStore,
         tools: ToolRegistry,
         events: EventBus,
         realtime: RealtimeHub,
     ) -> None:
         self.llm = llm
+        self.fast_llm = fast_llm
         self.memory = memory
         self.tools = tools
         self.events = events
         self.realtime = realtime
+        self._events: list[AgentEvent] = []
 
     @abstractmethod
     async def run(self, context: AgentContext) -> AgentResponse:
@@ -79,12 +82,12 @@ class BaseAgent(ABC):
             "instructions": instructions,
         }
         try:
-            result = await self.llm.json_response(
+            result = await self.fast_llm.json_response(
                 [
                     {
                         "role": "system",
                         "content": (
-                            "You are a local autonomous agent. Respond with valid JSON only. "
+                            "You are a local autonomous agent. Respond with raw valid JSON only. Do NOT use markdown blocks like ```json."
                             'Choose a single tool. Output schema: {"tool":"...", "args":{}, "reasoning":"..."}'
                         ),
                     },
