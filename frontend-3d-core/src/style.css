@@ -1,38 +1,59 @@
+/* ═══════════════════════════════════════════
+   FRIDAY AI Companion — Holographic HUD Stylesheet
+   ═══════════════════════════════════════════ */
+
 :root {
-  --primary: #00d4ff; /* Cyan */
-  --secondary: #613187; /* Subtle Purple */
-  --bg-gradient-top: #020204;
-  --bg-gradient-bottom: #050a14;
-  --glass: rgba(5, 10, 20, 0.4);
-  --glass-hover: rgba(5, 10, 20, 0.7);
-  --glass-border: rgba(0, 212, 255, 0.15);
-  --glass-highlight: rgba(0, 212, 255, 0.3);
-  --text-main: #ffffff;
-  --text-muted: rgba(255, 255, 255, 0.4);
+  --primary: #00d4ff;
+  --primary-dim: rgba(0, 212, 255, 0.4);
+  --primary-glow: rgba(0, 212, 255, 0.15);
+  --secondary: #613187;
+  --accent: #22ffcc;
+  --error: #ff2244;
+
+  --bg-void: #020204;
+  --bg-deep: #050a14;
+
+  --glass: rgba(5, 12, 30, 0.55);
+  --glass-hover: rgba(8, 18, 40, 0.75);
+  --glass-border: rgba(0, 212, 255, 0.12);
+  --glass-border-hover: rgba(0, 212, 255, 0.3);
+
+  --text-main: #e8edf5;
+  --text-muted: rgba(200, 215, 235, 0.45);
+  --text-friday: #00d4ff;
+
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-pill: 100px;
 }
 
-* { margin: 0; padding: 0; box-sizing: border-box; }
+/* ─── RESET ─── */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-  background: radial-gradient(circle at center, var(--bg-gradient-bottom) 0%, var(--bg-gradient-top) 100%);
+  background: var(--bg-void);
   color: var(--text-main);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-body);
   overflow: hidden;
   height: 100vh;
-  margin: 0;
 }
 
+/* ─── 3D CANVAS ─── */
 #canvas3d {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: -1;
+  top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  z-index: 0;
   pointer-events: none;
 }
 
-/* MCP Interface Layout Container */
+/* ═══════════════════════════════════════════
+   HUD GRID LAYOUT
+   ═══════════════════════════════════════════ */
 .hud {
   position: relative;
   z-index: 2;
@@ -41,113 +62,410 @@ body {
   pointer-events: none;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  grid-template-columns: 1fr 340px;
-  grid-template-areas: 
-    "status telemetry"
-    "response telemetry"
-    "input telemetry";
-  padding: 2.5rem;
-  gap: 2rem;
+  grid-template-columns: 1fr 280px;
+  grid-template-areas:
+    "topbar    topbar"
+    "convo     telemetry"
+    "input     telemetry";
+  padding: 1.5rem 2rem;
+  gap: 1rem;
 }
 
-.component {
-  pointer-events: auto;
-}
+.component { pointer-events: auto; }
 
-/* Status Indicator (Top-Left) */
-#StatusIndicator {
-  grid-area: status;
+/* ═══════════════════════════════════════════
+   TOP BAR
+   ═══════════════════════════════════════════ */
+#TopBar {
+  grid-area: topbar;
   display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  animation: slideFadeIn 1s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.mcp-signal-indicator {
-  display: inline-flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.4rem 0.8rem;
-  border-radius: 4px;
-  background: var(--glass);
-  border: 1px solid var(--glass-border);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.15em;
-  color: var(--primary);
-  align-self: flex-start;
+  justify-content: space-between;
+  animation: slideDown 0.8s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.signal-dot {
-  width: 4px;
-  height: 4px;
+/* FRIDAY Logo */
+.friday-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.logo-ring {
+  width: 32px;  height: 32px;
+  border-radius: 50%;
+  border: 1.5px solid var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 12px var(--primary-glow), inset 0 0 8px var(--primary-glow);
+  animation: logoPulse 3s ease-in-out infinite;
+}
+
+.logo-core {
+  width: 10px; height: 10px;
   border-radius: 50%;
   background: var(--primary);
   box-shadow: 0 0 8px var(--primary);
-  animation: pulse 2s infinite;
 }
 
-.status-text h1 {
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 1.2rem;
-  font-weight: 300;
-  letter-spacing: 0.1em;
-  color: var(--text-main);
-  margin-bottom: 0.2rem;
+.logo-text {
+  display: flex;
+  flex-direction: column;
 }
 
-.status-text p {
-  font-size: 0.7rem;
-  color: var(--text-muted);
+.logo-name {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.25em;
+  color: var(--primary);
+}
+
+.logo-sub {
+  font-size: 0.5rem;
   letter-spacing: 0.2em;
-  text-transform: uppercase;
-  font-weight: 400;
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
-/* Telemetry Panel (Right) */
+/* Status Pill */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 1rem;
+  border-radius: var(--radius-pill);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  color: var(--primary);
+  transition: all 0.5s ease;
+}
+
+.status-pill[data-state="thinking"] {
+  border-color: #3366ff;
+  color: #3366ff;
+}
+.status-pill[data-state="responding"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.status-pill[data-state="error"] {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.status-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 6px var(--primary);
+  animation: dotPulse 2s infinite;
+}
+
+/* System Stats */
+.sys-stats {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.stat {
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.stat svg { color: var(--accent); }
+
+/* ═══════════════════════════════════════════
+   CONVERSATION PANEL
+   ═══════════════════════════════════════════ */
+#ConversationArea {
+  grid-area: convo;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: fadeIn 1s 0.3s backwards;
+}
+
+#conversation-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to bottom, transparent 0%, black 8%, black 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 8%, black 100%);
+}
+
+#conversation-panel::-webkit-scrollbar { display: none; }
+
+#conversation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-bottom: 1rem;
+}
+
+/* Chat Bubbles */
+.chat-msg {
+  max-width: 680px;
+  animation: msgSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.chat-msg.user {
+  align-self: flex-end;
+}
+
+.chat-msg.friday {
+  align-self: flex-start;
+}
+
+.msg-label {
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.15em;
+  margin-bottom: 0.3rem;
+  font-weight: 500;
+}
+
+.chat-msg.user .msg-label {
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.chat-msg.friday .msg-label {
+  color: var(--primary);
+}
+
+.msg-bubble {
+  padding: 0.8rem 1.1rem;
+  border-radius: var(--radius);
+  font-size: 0.88rem;
+  line-height: 1.55;
+  font-weight: 300;
+  letter-spacing: 0.01em;
+}
+
+.chat-msg.user .msg-bubble {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-main);
+  border-radius: var(--radius) var(--radius) 4px var(--radius);
+}
+
+.chat-msg.friday .msg-bubble {
+  background: rgba(0, 212, 255, 0.06);
+  border: 1px solid rgba(0, 212, 255, 0.12);
+  border-left: 3px solid var(--primary);
+  color: var(--text-main);
+  border-radius: var(--radius) var(--radius) var(--radius) 4px;
+  text-shadow: 0 0 20px rgba(0, 212, 255, 0.06);
+}
+
+/* Typing indicator */
+.typing-indicator {
+  display: flex;
+  gap: 4px;
+  padding: 0.8rem 1.1rem;
+  align-items: center;
+}
+
+.typing-indicator .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  animation: typingBounce 1.4s infinite;
+}
+.typing-indicator .dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator .dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* ═══════════════════════════════════════════
+   INPUT AREA
+   ═══════════════════════════════════════════ */
+#InputArea {
+  grid-area: input;
+  animation: slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.2s backwards;
+}
+
+.input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+/* Voice Indicator */
+.voice-indicator {
+  position: relative;
+  width: 52px; height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.voice-ring {
+  position: absolute;
+  width: 100%; height: 100%;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 212, 255, 0.08);
+  animation: voiceRipple 3s ease-out infinite;
+  pointer-events: none;
+}
+.voice-ring.delay-1 { animation-delay: 1s; }
+.voice-ring.delay-2 { animation-delay: 2s; }
+
+.voice-indicator.listening .voice-ring {
+  border-color: rgba(0, 212, 255, 0.25);
+  animation-duration: 1.5s;
+}
+
+.mic-btn {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+  z-index: 1;
+}
+
+.mic-btn:hover {
+  background: var(--glass-hover);
+  border-color: var(--primary);
+  transform: scale(1.05);
+}
+
+.mic-btn.active {
+  background: var(--primary);
+  color: var(--bg-void);
+  box-shadow: 0 0 20px var(--primary-dim);
+  animation: micPulse 1.5s infinite;
+}
+
+/* Input Form */
+#objective-form {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(20px);
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+#objective-form:focus-within {
+  border-color: var(--glass-border-hover);
+  background: var(--glass-hover);
+  box-shadow: 0 4px 24px rgba(0, 212, 255, 0.08);
+}
+
+#objective-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 0.85rem 1.2rem;
+  color: var(--text-main);
+  font-size: 0.9rem;
+  font-weight: 300;
+  outline: none;
+  font-family: var(--font-display);
+  letter-spacing: 0.03em;
+}
+
+#objective-input::placeholder {
+  color: var(--text-muted);
+}
+
+.send-btn {
+  width: 42px; height: 42px;
+  background: transparent;
+  border: none;
+  color: var(--primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  opacity: 0.5;
+  margin-right: 0.3rem;
+}
+
+.send-btn:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+/* Input Hint */
+.input-hint {
+  text-align: center;
+  margin-top: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+.input-hint strong {
+  color: var(--primary);
+  font-weight: 500;
+}
+
+/* ═══════════════════════════════════════════
+   TELEMETRY SIDEBAR
+   ═══════════════════════════════════════════ */
 #TelemetryPanel {
   grid-area: telemetry;
-  width: 320px;
+  width: 260px;
   max-height: 100%;
   background: var(--glass);
   border: 1px solid var(--glass-border);
   backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-radius: 8px;
+  border-radius: var(--radius);
   display: flex;
   flex-direction: column;
   transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
+  animation: fadeIn 1s 0.6s backwards;
 }
 
 #TelemetryPanel.collapsed {
-  transform: translateX(calc(100% - 2.5rem));
-  background: transparent;
-  border-color: transparent;
-  backdrop-filter: none;
-}
-
-#TelemetryPanel:hover {
-  transform: translateX(0);
-  background: var(--glass-hover);
-  border-color: var(--glass-border);
-  backdrop-filter: blur(16px);
+  transform: translateX(calc(100% + 1rem));
+  opacity: 0;
+  pointer-events: none;
 }
 
 .panel-header {
-  padding: 1rem;
+  padding: 0.8rem 1rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(0, 212, 255, 0.05);
+  border-bottom: 1px solid rgba(0, 212, 255, 0.06);
   cursor: pointer;
 }
 
 .panel-header h3 {
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
   letter-spacing: 0.2em;
   color: var(--primary);
   font-weight: 500;
@@ -160,154 +478,95 @@ body {
   transition: transform 0.3s;
 }
 
-#TelemetryPanel:hover .toggle-icon {
-  transform: rotate(180deg);
-}
-
 .panel-content {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem;
+  padding: 0.75rem;
   scrollbar-width: none;
 }
-
 .panel-content::-webkit-scrollbar { display: none; }
 
 .feed-item {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: var(--text-main);
-  padding: 0.8rem 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  animation: fadeIn 0.4s forwards;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  animation: fadeIn 0.3s forwards;
+  font-weight: 300;
 }
 
 .feed-item .source {
   color: var(--primary);
-  font-size: 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
   letter-spacing: 0.1em;
   display: block;
-  margin-bottom: 0.2rem;
+  margin-bottom: 0.15rem;
 }
 
-/* Input Bar (Bottom) */
-#InputBar {
-  grid-area: input;
-  justify-self: start;
-  width: 600px;
-  max-width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  animation: slideFadeInUp 1s cubic-bezier(0.16, 1, 0.3, 1) 0.2s backwards;
+/* ═══════════════════════════════════════════
+   KEYFRAME ANIMATIONS
+   ═══════════════════════════════════════════ */
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-20px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-.mic-btn {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: var(--glass);
-  border: 1px solid var(--glass-border);
-  color: var(--primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  transition: all 0.3s ease;
-  flex-shrink: 0;
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-.mic-btn:hover {
-  background: var(--glass-hover);
-  border-color: var(--primary);
-  transform: scale(1.05);
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
-.mic-btn.active {
-  background: var(--primary);
-  color: #000;
-  box-shadow: 0 0 20px var(--primary);
-  animation: micPulse 1.5s infinite;
+@keyframes msgSlideIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-#objective-form {
-  flex: 1;
-  background: var(--glass);
-  border: 1px solid var(--glass-border);
-  border-radius: 4px;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  transition: all 0.3s ease;
+@keyframes dotPulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--primary); }
+  50%      { opacity: 0.4; box-shadow: 0 0 2px var(--primary); }
+}
+
+@keyframes logoPulse {
+  0%, 100% { box-shadow: 0 0 12px var(--primary-glow), inset 0 0 8px var(--primary-glow); }
+  50%      { box-shadow: 0 0 20px rgba(0, 212, 255, 0.25), inset 0 0 12px rgba(0, 212, 255, 0.2); }
 }
 
 @keyframes micPulse {
-  0% { transform: scale(1); box-shadow: 0 0 10px var(--primary); }
-  50% { transform: scale(1.1); box-shadow: 0 0 25px var(--primary); }
-  100% { transform: scale(1); box-shadow: 0 0 10px var(--primary); }
+  0%   { transform: scale(1);   box-shadow: 0 0 10px var(--primary-dim); }
+  50%  { transform: scale(1.08); box-shadow: 0 0 25px var(--primary-dim); }
+  100% { transform: scale(1);   box-shadow: 0 0 10px var(--primary-dim); }
 }
 
-#objective-form:focus-within {
-  border-color: var(--glass-highlight);
-  background: var(--glass-hover);
-  box-shadow: 0 4px 20px rgba(0, 212, 255, 0.1);
+@keyframes voiceRipple {
+  0%   { transform: scale(0.8); opacity: 0.6; }
+  100% { transform: scale(1.6); opacity: 0; }
 }
 
-#objective-input {
-  width: 100%;
-  background: transparent;
-  border: none;
-  padding: 0.8rem 1.2rem;
-  color: var(--text-main);
-  font-size: 0.9rem;
-  font-weight: 300;
-  outline: none;
-  font-family: 'Space Grotesk', sans-serif;
-  letter-spacing: 0.05em;
+@keyframes typingBounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.3; }
+  40%           { transform: translateY(-6px); opacity: 1; }
 }
 
-#objective-input::placeholder {
-  color: var(--text-muted);
-}
+/* ═══════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════ */
+@media (max-width: 900px) {
+  .hud {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "topbar"
+      "convo"
+      "input";
+    padding: 1rem;
+  }
 
-/* Response HUD (Center/Top-Right area) */
-#ResponseHUD {
-  grid-area: response;
-  max-width: 700px;
-  align-self: flex-start;
-  animation: slideFadeIn 1s cubic-bezier(0.16, 1, 0.3, 1) 0.4s backwards;
+  #TelemetryPanel { display: none; }
+  .sys-stats     { display: none; }
+  .chat-msg      { max-width: 100%; }
 }
-
-.terminal-container {
-  padding: 1.5rem;
-  background: rgba(0, 20, 40, 0.3);
-  border-left: 3px solid var(--primary);
-  backdrop-filter: blur(4px);
-  position: relative;
-  overflow: hidden;
-}
-
-.terminal-container::before {
-  content: "";
-  position: absolute;
-  top: 0; left: 0; right: 0; height: 1px;
-  background: linear-gradient(90deg, var(--primary), transparent);
-  animation: scanline 4s linear infinite;
-}
-
-#terminal-output {
-  font-family: 'Space Grotesk', monospace;
-  font-size: 1.1rem;
-  line-height: 1.6;
-  color: var(--text-main);
-  text-shadow: 0 0 10px rgba(0, 212, 255, 0.4);
-  font-weight: 300;
-  letter-spacing: 0.02em;
-}
-
-@keyframes scanline {
-  0% { transform: translateY(-100%); }
-  100% { transform: translateY(1000%); }
-}
-
-/* Existing Animations... */

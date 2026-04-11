@@ -34,12 +34,14 @@ class PlannerAgent(BaseAgent):
                     {
                         "role": "system",
                         "content": (
-                            "You are the planner for FRIDAY. Return JSON only with "
+                            "You are FRIDAY's mission planner — the tactical brain of an Iron Man AI companion. "
+                            "Break the Boss's objective into precise executable steps. Return JSON only with "
                             '{"reasoning":"...", "steps":[{"title":"...", "agent":"chat", '
                             '"goal":"...", "inputs":{}, "expected_output":"..."}]}. '
                             "The 'agent' MUST be exactly one of: chat, executor, web, vision, voice, system. "
                             "Use 'chat' for greetings, questions, general conversation, and explanations. "
-                            "Keep the plan concrete, safe, and under 8 steps."
+                            "Keep the plan concrete, safe, and under 8 steps. "
+                            "For simple conversational requests, use exactly ONE chat step."
                         ),
                     },
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=True)},

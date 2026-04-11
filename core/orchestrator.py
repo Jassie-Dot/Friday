@@ -3,16 +3,45 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 
-from agents.base import AgentContext
+from agents.base import AgentContext, AgentResponse
 from agents.registry import AgentRegistry
 from core.llm import OllamaClient
-from core.models import AgentName, ObjectiveRequest, PresenceMode, StepExecution, StepStatus, TaskPlan, TaskRecord, TaskStatus, utc_now
+from core.models import AgentName, ObjectiveRequest, PresenceMode, StepExecution, StepStatus, TaskPlan, TaskRecord, TaskStep, TaskStatus, utc_now
 from core.realtime import RealtimeHub
 from memory.store import MemoryStore
 
 logger = logging.getLogger(__name__)
+
+# Keywords that indicate a task rather than a conversation
+_TASK_KEYWORDS = frozenset({
+    "search", "research", "scrape", "web", "browse", "internet",
+    "image", "visual", "art", "render", "draw", "picture", "generate",
+    "transcribe", "dictation", "record",
+    "browser", "open app", "launch", "automation",
+    "run", "execute", "script", "code", "compile", "build", "install",
+    "file", "folder", "directory", "delete", "create", "move", "copy",
+    "download", "upload", "deploy",
+})
+
+
+def _is_conversational(objective: str) -> bool:
+    """Return True if the objective looks like casual conversation rather than a task."""
+    lower = objective.lower().strip()
+    # Very short messages are almost always conversational
+    if len(lower.split()) <= 4:
+        # But check for task keywords even in short messages
+        if not any(kw in lower for kw in _TASK_KEYWORDS):
+            return True
+    # Questions that start with who/what/why/how/when/where + conversational
+    if re.match(r"^(hey|hi|hello|yo|sup|good morning|good evening|good night|thanks|thank you|bye|goodbye)", lower):
+        return True
+    if re.match(r"^(who|what|why|how|when|where|can you|could you|tell me|explain|describe)", lower):
+        if not any(kw in lower for kw in _TASK_KEYWORDS):
+            return True
+    return False
 
 
 class FridayOrchestrator:
@@ -73,16 +102,147 @@ class FridayOrchestrator:
                 continue
             try:
                 await self._execute(record, request)
+            except Exception as exc:
+                logger.error("Task execution failed completely: %s", exc, exc_info=True)
+                if record:
+                    record.status = TaskStatus.failed
+                    record.summary = f"System error: {exc}"
+                try:
+                    await self.realtime.set_presence(
+                        mode=PresenceMode.error,
+                        headline="System fault detected",
+                        whisper="Something went wrong, Boss",
+                        terminal_text=f"I hit a wall on that one, Boss. Error: {exc}",
+                        active_agents=[],
+                        current_objective=request.objective if request else None,
+                        energy=0.95,
+                    )
+                except Exception:
+                    pass
             finally:
                 self._queue.task_done()
 
+    # ──────────────────────────────────────────────
+    # FAST-PATH: Skip planner for conversational input
+    # ──────────────────────────────────────────────
     async def _execute(self, record: TaskRecord, request: ObjectiveRequest) -> None:
-        memories = self.memory.query(request.objective, limit=5)
+        if _is_conversational(request.objective):
+            await self._execute_fast_chat(record, request)
+        else:
+            await self._execute_full(record, request)
+
+    async def _execute_fast_chat(self, record: TaskRecord, request: ObjectiveRequest) -> None:
+        """Direct chat path — no planner, no multi-step. Instant response."""
+        memories = self.memory.query(request.objective, limit=3)
+
         await self.realtime.set_presence(
             mode=PresenceMode.thinking,
-            headline="Planning objective",
+            headline="Processing",
             whisper=request.objective,
-            terminal_text="ANALYZING MISSION PARAMETERS...",
+            terminal_text="One moment, Boss...",
+            active_agents=[AgentName.chat],
+            current_objective=request.objective,
+            energy=0.5,
+        )
+        record.status = TaskStatus.running
+        record.updated_at = utc_now()
+
+        # Single-step plan for bookkeeping
+        step = TaskStep(
+            title="Respond to Boss",
+            agent=AgentName.chat,
+            goal=request.objective,
+        )
+        record.plan = TaskPlan(
+            objective=request.objective,
+            reasoning="Fast-path conversational response",
+            steps=[step],
+        )
+
+        chat_agent = self.agents.get(AgentName.chat)
+        try:
+            response = await chat_agent.run(
+                AgentContext(
+                    task_id=record.id,
+                    objective=request.objective,
+                    task_context=request.context,
+                    step=step,
+                    memories=memories,
+                    previous_results=[],
+                )
+            )
+        except Exception as exc:
+            logger.error("Chat agent crashed: %s", exc, exc_info=True)
+            response = AgentResponse(
+                success=False,
+                summary=f"Sorry Boss, I hit a snag: {exc}",
+                error=str(exc),
+            )
+
+        execution = StepExecution(
+            step_id=step.id,
+            agent=AgentName.chat,
+            success=response.success,
+            output=response.summary,
+            data=response.data,
+            error=response.error,
+            completed_at=utc_now(),
+        )
+        record.step_results.append(execution)
+        record.status = TaskStatus.completed if response.success else TaskStatus.failed
+        record.summary = response.summary
+        record.updated_at = utc_now()
+
+        # Push conversation to frontend
+        await self.realtime.add_conversation(
+            role="user",
+            text=request.objective,
+        )
+        await self.realtime.add_conversation(
+            role="friday",
+            text=response.summary,
+        )
+
+        await self.realtime.set_presence(
+            mode=PresenceMode.responding,
+            headline="FRIDAY",
+            whisper="Response ready",
+            terminal_text=response.summary,
+            active_agents=[],
+            current_objective=request.objective,
+            energy=0.35,
+        )
+
+        if request.store_memory:
+            for entry in response.memory_entries:
+                self.memory.add(entry["document"], entry.get("metadata", {}))
+
+        await self._journal(record)
+
+        # Return to idle after a beat
+        await asyncio.sleep(0.5)
+        await self.realtime.set_presence(
+            mode=PresenceMode.idle,
+            headline="FRIDAY",
+            whisper="Standing by, Boss",
+            active_agents=[],
+            current_objective=None,
+            energy=0.15,
+        )
+
+    # ──────────────────────────────────────────────
+    # FULL PIPELINE: Planner → Agent steps
+    # ──────────────────────────────────────────────
+    async def _execute_full(self, record: TaskRecord, request: ObjectiveRequest) -> None:
+        memories = self.memory.query(request.objective, limit=5)
+
+        await self.realtime.add_conversation(role="user", text=request.objective)
+
+        await self.realtime.set_presence(
+            mode=PresenceMode.thinking,
+            headline="Analyzing",
+            whisper=request.objective,
+            terminal_text="Running diagnostics on your request, Boss...",
             active_agents=[AgentName.planner],
             current_objective=request.objective,
             energy=0.45,
@@ -113,27 +273,25 @@ class FridayOrchestrator:
 
         for step in plan.steps:
             step.status = StepStatus.running
-            
-            # Set presence based on agent type
+
             presence_mode = PresenceMode.thinking
             if step.agent == AgentName.chat:
                 presence_mode = PresenceMode.responding
-            
+
             await self.realtime.set_presence(
                 mode=presence_mode,
-                headline=f"{step.agent.value.title()} agent active",
+                headline=f"{step.agent.value.title()} protocol active",
                 whisper=step.title,
                 active_agents=[step.agent],
                 current_objective=request.objective,
                 energy=0.8 if step.agent == AgentName.chat else 0.6,
             )
             response = await self._run_step(record, request, step, memories)
-            
+
             if response.success:
-                # Update terminal with the step output if it's meaningful
                 await self.realtime.set_presence(
                     mode=presence_mode,
-                    headline=f"{step.agent.value.title()} agent active",
+                    headline=f"{step.agent.value.title()} protocol active",
                     whisper=step.title,
                     terminal_text=response.summary,
                     active_agents=[step.agent],
@@ -145,7 +303,7 @@ class FridayOrchestrator:
                 record.status = TaskStatus.failed
                 await self.realtime.set_presence(
                     mode=PresenceMode.error,
-                    headline="Execution fault",
+                    headline="Protocol fault",
                     whisper=step.title,
                     terminal_text=response.error or response.summary,
                     active_agents=[AgentName.debug],
@@ -156,36 +314,42 @@ class FridayOrchestrator:
 
         if record.status != TaskStatus.failed:
             record.status = TaskStatus.completed
-            
-            # FAST PATH: If the task was a single-step chat, skip the expensive summary step
-            if len(plan.steps) == 1 and plan.steps[0].agent == AgentName.chat:
-                summary = record.steps[0].output_summary
+
+            # FAST PATH: single-step chat — use the output directly
+            if len(plan.steps) == 1 and plan.steps[0].agent == AgentName.chat and record.step_results:
+                summary = record.step_results[0].output
             else:
                 summary = await self._summarize(record)
-                
+
             record.summary = summary
-            
+
+            await self.realtime.add_conversation(role="friday", text=summary)
+
             await self.realtime.set_presence(
                 mode=PresenceMode.responding,
-                headline="Objective completed",
+                headline="Mission complete",
                 whisper=request.objective,
                 terminal_text=summary,
                 active_agents=[],
                 current_objective=request.objective,
                 energy=0.35,
             )
+        else:
+            if not record.summary:
+                record.summary = await self._summarize(record)
+            await self.realtime.add_conversation(
+                role="friday",
+                text=record.summary or "I wasn't able to complete that one, Boss.",
+            )
 
-        if not record.summary:
-            record.summary = await self._summarize(record)
-            
         if request.store_memory:
             record.learning_note = await self._learning_note(record)
         record.updated_at = utc_now()
         await self._journal(record)
         await self.realtime.set_presence(
             mode=PresenceMode.idle,
-            headline="FRIDAY online",
-            whisper="Standing by for the next objective",
+            headline="FRIDAY",
+            whisper="Standing by, Boss",
             active_agents=[],
             current_objective=None,
             energy=0.15,
@@ -193,16 +357,26 @@ class FridayOrchestrator:
 
     async def _run_step(self, record: TaskRecord, request: ObjectiveRequest, step, memories):
         agent = self.agents.get(step.agent)
-        response = await agent.run(
-            AgentContext(
-                task_id=record.id,
-                objective=record.objective,
-                task_context=request.context,
-                step=step,
-                memories=memories,
-                previous_results=record.step_results,
+        try:
+            response = await agent.run(
+                AgentContext(
+                    task_id=record.id,
+                    objective=record.objective,
+                    task_context=request.context,
+                    step=step,
+                    memories=memories,
+                    previous_results=record.step_results,
+                )
             )
-        )
+        except Exception as exc:
+            logger.error("Agent %s crashed: %s", step.agent.value, exc, exc_info=True)
+            response = AgentResponse(
+                success=False,
+                summary=f"Agent {step.agent.value} encountered an error: {exc}",
+                error=str(exc),
+                data={},
+            )
+
         execution = StepExecution(
             step_id=step.id,
             agent=step.agent,
@@ -231,22 +405,8 @@ class FridayOrchestrator:
             return response
 
         debugger = self.agents.get(AgentName.debug)
-        debug_response = await debugger.run(
-            AgentContext(
-                task_id=record.id,
-                objective=record.objective,
-                task_context=request.context,
-                step=step,
-                memories=memories,
-                previous_results=record.step_results,
-                failure_reason=response.error or response.summary,
-            )
-        )
-        execution.data["debug"] = debug_response.data
-        retry_inputs = debug_response.data.get("suggested_retry_inputs", {})
-        if retry_inputs:
-            step.inputs.update(retry_inputs)
-            retry = await agent.run(
+        try:
+            debug_response = await debugger.run(
                 AgentContext(
                     task_id=record.id,
                     objective=record.objective,
@@ -254,8 +414,32 @@ class FridayOrchestrator:
                     step=step,
                     memories=memories,
                     previous_results=record.step_results,
+                    failure_reason=response.error or response.summary,
                 )
             )
+        except Exception as exc:
+            logger.error("Debugger crashed: %s", exc, exc_info=True)
+            debug_response = AgentResponse(success=False, summary=str(exc))
+
+        execution.data["debug"] = debug_response.data
+        retry_inputs = debug_response.data.get("suggested_retry_inputs", {})
+        if retry_inputs:
+            step.inputs.update(retry_inputs)
+            try:
+                retry = await agent.run(
+                    AgentContext(
+                        task_id=record.id,
+                        objective=record.objective,
+                        task_context=request.context,
+                        step=step,
+                        memories=memories,
+                        previous_results=record.step_results,
+                    )
+                )
+            except Exception as exc:
+                logger.error("Agent replay crashed: %s", exc, exc_info=True)
+                retry = AgentResponse(success=False, summary=str(exc), error=str(exc))
+
             record.step_results.append(
                 StepExecution(
                     step_id=step.id,
@@ -276,7 +460,14 @@ class FridayOrchestrator:
         try:
             result = await self.llm.json_response(
                 [
-                    {"role": "system", "content": 'Summarize the task result. Return JSON only with {"summary":"..."}'},
+                    {
+                        "role": "system",
+                        "content": (
+                            'You are FRIDAY, the AI companion from Iron Man. '
+                            'Summarize what you accomplished for the Boss. Be concise, confident, and slightly witty. '
+                            'Return JSON only: {"summary":"..."}'
+                        ),
+                    },
                     {
                         "role": "user",
                         "content": json.dumps(
@@ -295,7 +486,7 @@ class FridayOrchestrator:
                 return result["summary"]
         except Exception as exc:
             logger.warning("Task summary fell back to heuristic text: %s", exc)
-        return fallback or "Objective finished without a detailed summary."
+        return fallback or "Objective processed, Boss."
 
     async def _learning_note(self, record: TaskRecord) -> str:
         fallback = "Failures should be narrowed to smaller tool calls; successes should be reused as templates."
