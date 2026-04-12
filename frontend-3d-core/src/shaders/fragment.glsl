@@ -89,9 +89,14 @@ void main() {
     coolColor = mix(uColorB, vec3(0.1, 0.2, 0.8), 0.3);
     brightnessMultiplier = 1.2;
   } else if(uState < 3.5) {
-    // RESPONDING: bright cyan-green, radiant outward
+    // SPEAKING: bright cyan-green, radiant outward
     hotColor = mix(uColorA, vec3(0.2, 1.0, 0.8), 0.3);
     brightnessMultiplier = 1.0 + sin(uTime * 4.0) * 0.15;
+  } else if(uState < 4.5) {
+    // EXECUTING: hard-edged white-cyan bursts
+    hotColor = mix(uColorA, vec3(0.95, 1.0, 1.0), 0.45);
+    coolColor = mix(uColorB, vec3(0.1, 0.95, 0.9), 0.35);
+    brightnessMultiplier = 1.12 + step(0.55, sin(uTime * 16.0) * 0.5 + 0.5) * 0.28;
   } else {
     // ERROR: red-shifted
     hotColor = vec3(1.0, 0.1, 0.2);

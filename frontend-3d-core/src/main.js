@@ -1,760 +1,743 @@
-import './style.css';
-import * as THREE from 'three';
-import { GPUComputationRenderer } from 'three-stdlib';
+import "./style.css";
+import * as THREE from "three";
+import { GPUComputationRenderer } from "three-stdlib";
 
-import simShader from './shaders/simulation.glsl';
-import vertShader from './shaders/vertex.glsl';
-import fragShader from './shaders/fragment.glsl';
-import { EffectsComposer } from './effects.js';
+import simShader from "./shaders/simulation.glsl";
+import vertShader from "./shaders/vertex.glsl";
+import fragShader from "./shaders/fragment.glsl";
+import { EffectsComposer } from "./effects.js";
+import { WispsSystem } from "./wisps.js";
 
-// === TUNABLE PARAMETERS ===
-const SIZE = 160; // 25,600 particles
-const BOLT_COUNT = 12;
-const BOLT_SEGMENTS = 20;
+const SIZE = 160;
+const RAW_API_URL = import.meta.env.VITE_FRIDAY_API_URL || "http://127.0.0.1:8000";
+const API_URL = RAW_API_URL.trim().replace(/\/+$/, "");
+const PRESENCE_WS_URL = API_URL.replace(/^http/, "ws") + "/ws/presence";
+const SESSION_WS_URL = API_URL.replace(/^http/, "ws") + "/ws/session";
+const VOICE_SAMPLE_RATE = 16000;
 
-const API_URL = import.meta.env.VITE_FRIDAY_API_URL || "http://127.0.0.1:8000";
-const WS_URL = API_URL.replace(/^http/, "ws") + "/ws/presence";
+const stateIndex = {
+  idle: 0,
+  listening: 1,
+  thinking: 2,
+  speaking: 3,
+  executing: 4,
+  error: 5
+};
 
-// ── State ──
-let currentPresence = { mode: 'idle', energy: 0.15 };
-let audioLevel = 0;
-let scene, camera, renderer, composer, gpuCompute, posVariable;
+const dom = {
+  modePill: document.getElementById("mode-pill"),
+  modeDot: document.getElementById("mode-dot"),
+  modeLabel: document.getElementById("mode-label"),
+  leadLine: document.getElementById("lead-line"),
+  subLine: document.getElementById("sub-line"),
+  whisperLine: document.getElementById("whisper-line"),
+  activateButton: document.getElementById("activate-button"),
+  micBar: document.getElementById("mic-bar"),
+  voiceBar: document.getElementById("voice-bar")
+};
+
+const currentPresence = {
+  mode: "idle",
+  energy: 0.16,
+  whisper: "Standing by",
+  headline: "FRIDAY"
+};
+
+const audioState = {
+  armed: false,
+  sessionReady: false,
+  micLevel: 0,
+  audioContext: null,
+  outputGain: null,
+  processor: null,
+  captureActive: false,
+  silenceMs: 0,
+  speechMs: 0,
+  threshold: 0.028
+};
+
+const playbackState = {
+  active: false,
+  pendingStop: false,
+  nextStart: 0,
+  sources: new Set(),
+  level: 0,
+  targetLevel: 0
+};
+
+let presenceSocket = null;
+let sessionSocket = null;
+let reconnectTimer = null;
+
+let scene;
+let camera;
+let renderer;
+let composer;
+let gpuCompute;
+let posVariable;
 let particleSystem;
-let clock = new THREE.Clock();
-let bolts = [];
+let coreMesh;
+let ringMesh;
+let shellMesh;
+let wisps;
+const clock = new THREE.Clock();
 
-// Voice system state
-let recognition;
-let isListening = false;
-let isContinuousMode = false;
-let synth = window.speechSynthesis;
-let wsSocket = null;
-let spokenTexts = new Set(); // Track already-spoken texts
+boot();
 
-// ── UI Elements ──
-const presenceModeEl     = document.getElementById('presence-mode');
-const statusPillEl       = document.getElementById('status-pill');
-const statusDotEl        = document.getElementById('status-dot');
-const conversationListEl = document.getElementById('conversation-list');
-const feedListEl         = document.getElementById('feed-list');
-const micToggleBtn       = document.getElementById('mic-toggle');
-const voiceIndicatorEl   = document.getElementById('voice-indicator');
-const formEl             = document.getElementById('objective-form');
-const inputEl            = document.getElementById('objective-input');
-const voiceStatusEl      = document.getElementById('voice-status');
-const statConnectionEl   = document.getElementById('stat-connection');
-
-init();
-
-// ═══════════════════════════════════════════
-// LIGHTNING BOLT SYSTEM
-// ═══════════════════════════════════════════
-function createBoltGeometry() {
-  const points = [];
-  const direction = new THREE.Vector3(
-    Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5
-  ).normalize();
-  const startRadius = 1.5 + Math.random() * 1.5;
-  let current = direction.clone().multiplyScalar(startRadius);
-  points.push(current.clone());
-  const boltLength = 2.0 + Math.random() * 4.0;
-  const segmentLength = boltLength / BOLT_SEGMENTS;
-  for (let i = 0; i < BOLT_SEGMENTS; i++) {
-    const jitter = new THREE.Vector3(
-      (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8
-    );
-    current = current.clone().add(direction.clone().multiplyScalar(segmentLength).add(jitter));
-    points.push(current.clone());
-  }
-  return new THREE.BufferGeometry().setFromPoints(points);
+function boot() {
+  initScene();
+  connectPresenceSocket();
+  attachUI();
+  window.addEventListener("resize", onWindowResize);
+  animate();
 }
 
-function createBranch(startPoint, parentDir) {
-  const points = [startPoint.clone()];
-  const branchDir = parentDir.clone().add(
-    new THREE.Vector3((Math.random()-0.5)*1.5, (Math.random()-0.5)*1.5, (Math.random()-0.5)*1.5)
-  ).normalize();
-  let current = startPoint.clone();
-  const segments = 5 + Math.floor(Math.random() * 6);
-  const segLen = 0.3 + Math.random() * 0.4;
-  for (let i = 0; i < segments; i++) {
-    const jitter = new THREE.Vector3((Math.random()-0.5)*0.5, (Math.random()-0.5)*0.5, (Math.random()-0.5)*0.5);
-    current = current.clone().add(branchDir.clone().multiplyScalar(segLen).add(jitter));
-    points.push(current.clone());
-  }
-  return new THREE.BufferGeometry().setFromPoints(points);
-}
-
-function initLightningPool() {
-  for (let i = 0; i < BOLT_COUNT; i++) {
-    const boltMaterial = new THREE.LineBasicMaterial({
-      color: 0x00d4ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, linewidth: 1
-    });
-    const boltGeo = createBoltGeometry();
-    const boltLine = new THREE.Line(boltGeo, boltMaterial);
-    boltLine.visible = false;
-    scene.add(boltLine);
-    const branches = [];
-    for (let b = 0; b < 2; b++) {
-      const branchMat = new THREE.LineBasicMaterial({
-        color: 0x4488ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, linewidth: 1
-      });
-      const branchGeo = createBoltGeometry();
-      const branchLine = new THREE.Line(branchGeo, branchMat);
-      branchLine.visible = false;
-      scene.add(branchLine);
-      branches.push({ line: branchLine, material: branchMat });
-    }
-    bolts.push({ line: boltLine, material: boltMaterial, branches, life: 0, maxLife: 0, active: false });
-  }
-}
-
-function spawnBolt(color) {
-  const bolt = bolts.find(b => !b.active);
-  if (!bolt) return;
-  const newGeo = createBoltGeometry();
-  bolt.line.geometry.dispose();
-  bolt.line.geometry = newGeo;
-  bolt.material.color.set(color || 0x00d4ff);
-  const positions = newGeo.attributes.position.array;
-  const parentDir = new THREE.Vector3(
-    positions[positions.length-3]-positions[0],
-    positions[positions.length-2]-positions[1],
-    positions[positions.length-1]-positions[2]
-  ).normalize();
-  bolt.branches.forEach((branch) => {
-    const midIdx = Math.floor(BOLT_SEGMENTS * (0.3 + Math.random() * 0.4)) * 3;
-    const branchStart = new THREE.Vector3(positions[midIdx], positions[midIdx+1], positions[midIdx+2]);
-    const branchGeo = createBranch(branchStart, parentDir);
-    branch.line.geometry.dispose();
-    branch.line.geometry = branchGeo;
-    branch.material.color.set(color || 0x4488ff);
-    branch.line.visible = true;
-    branch.material.opacity = 0.8;
-  });
-  bolt.active = true;
-  bolt.life = 0;
-  bolt.maxLife = 0.08 + Math.random() * 0.15;
-  bolt.line.visible = true;
-  bolt.material.opacity = 1.0;
-}
-
-function updateLightning(delta, stateIdx) {
-  let spawnChance = 0;
-  let boltColor = 0x00d4ff;
-  if (stateIdx === 0) {
-    spawnChance = 0.005 + audioLevel * 0.02;
-    boltColor = 0x00d4ff;
-  } else if (stateIdx === 1) {
-    const beat = Math.pow(Math.sin(clock.getElapsedTime() * 3.5) * 0.5 + 0.5, 6);
-    spawnChance = beat * 0.3 + audioLevel * 0.05;
-    boltColor = 0x66ccff;
-  } else if (stateIdx === 2) {
-    spawnChance = 0.15 + audioLevel * 0.15;
-    boltColor = 0x3366ff;
-  } else if (stateIdx === 3) {
-    spawnChance = 0.06 + audioLevel * 0.08;
-    boltColor = 0x22ffcc;
-  } else {
-    spawnChance = 0.2;
-    boltColor = 0xff2244;
-  }
-  if (Math.random() < spawnChance) spawnBolt(boltColor);
-  bolts.forEach(bolt => {
-    if (!bolt.active) return;
-    bolt.life += delta;
-    const progress = bolt.life / bolt.maxLife;
-    if (progress >= 1.0) {
-      bolt.active = false;
-      bolt.line.visible = false;
-      bolt.material.opacity = 0;
-      bolt.branches.forEach(b => { b.line.visible = false; b.material.opacity = 0; });
-      return;
-    }
-    const flash = Math.pow(1.0 - progress, 3.0);
-    bolt.material.opacity = flash;
-    bolt.branches.forEach(b => { b.material.opacity = flash * 0.7; });
-  });
-}
-
-// ═══════════════════════════════════════════
-// CORE INIT
-// ═══════════════════════════════════════════
-async function init() {
+function initScene() {
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.z = 12;
+  camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.1, 200);
+  camera.position.set(0, 0, 11.5);
 
   renderer = new THREE.WebGLRenderer({
-    canvas: document.getElementById('canvas3d'),
-    antialias: false, alpha: true, powerPreference: 'high-performance'
+    canvas: document.getElementById("canvas3d"),
+    antialias: false,
+    alpha: true,
+    powerPreference: "high-performance"
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 1.08;
 
-  try {
-    if (document.getElementById('canvas3d')) {
-      initComputeRenderer();
-      initParticles();
-      initLightningPool();
-      composer = new EffectsComposer(renderer, scene, camera);
-    }
-    window.addEventListener('resize', onWindowResize);
-    if (formEl) formEl.addEventListener('submit', handleFormSubmit);
-
-    setupAudio();
-    connectWebSocket();
-    initVoiceSystem();
-    animate();
-  } catch (err) {
-    console.error('FRIDAY: Critical init failure', err);
-    if (particleSystem) animate();
-  }
+  initComputeRenderer();
+  initParticles();
+  initCoreMeshes();
+  wisps = new WispsSystem(scene, currentPresence);
+  composer = new EffectsComposer(renderer, scene, camera);
 }
 
 function initComputeRenderer() {
   gpuCompute = new GPUComputationRenderer(SIZE, SIZE, renderer);
   const dtPosition = gpuCompute.createTexture();
-  const positionData = dtPosition.image.data;
-  for (let i = 0; i < positionData.length; i += 4) {
-    const r = 1.5 + Math.random() * 3.5;
+  const data = dtPosition.image.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const radius = 1.2 + Math.random() * 4.1;
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(2 * Math.random() - 1);
-    const spiralAngle = theta + r * 0.3;
-    positionData[i + 0] = r * Math.sin(phi) * Math.cos(spiralAngle);
-    positionData[i + 1] = r * Math.cos(phi) * 0.5;
-    positionData[i + 2] = r * Math.sin(phi) * Math.sin(spiralAngle);
-    positionData[i + 3] = 0.5 + Math.random() * 0.5;
+    data[i + 0] = radius * Math.sin(phi) * Math.cos(theta);
+    data[i + 1] = radius * Math.cos(phi) * 0.65;
+    data[i + 2] = radius * Math.sin(phi) * Math.sin(theta);
+    data[i + 3] = 0.45 + Math.random() * 0.55;
   }
-  posVariable = gpuCompute.addVariable('uCurrentPos', simShader, dtPosition);
+
+  posVariable = gpuCompute.addVariable("uCurrentPos", simShader, dtPosition);
   gpuCompute.setVariableDependencies(posVariable, [posVariable]);
-  posVariable.material.uniforms.uTime   = { value: 0 };
-  posVariable.material.uniforms.uDelta  = { value: 0 };
-  posVariable.material.uniforms.uAudio  = { value: 0 };
-  posVariable.material.uniforms.uState  = { value: 0 };
-  posVariable.material.uniforms.uEnergy = { value: 0.15 };
+  posVariable.material.uniforms.uTime = { value: 0 };
+  posVariable.material.uniforms.uDelta = { value: 0 };
+  posVariable.material.uniforms.uAudio = { value: 0 };
+  posVariable.material.uniforms.uState = { value: 0 };
+  posVariable.material.uniforms.uEnergy = { value: currentPresence.energy };
   const error = gpuCompute.init();
-  if (error) console.error('GPUCompute Init Error:', error);
+  if (error) {
+    throw new Error(`GPU compute init failed: ${error}`);
+  }
 }
 
 function initParticles() {
   const geometry = new THREE.BufferGeometry();
-  const positions = new Float32Array(SIZE * SIZE * 3);
   const references = new Float32Array(SIZE * SIZE * 2);
-  for (let i = 0; i < SIZE * SIZE; i++) {
-    references[i * 2]     = (i % SIZE) / SIZE;
+  const positions = new Float32Array(SIZE * SIZE * 3);
+
+  for (let i = 0; i < SIZE * SIZE; i += 1) {
+    references[i * 2] = (i % SIZE) / SIZE;
     references[i * 2 + 1] = Math.floor(i / SIZE) / SIZE;
   }
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('reference', new THREE.BufferAttribute(references, 2));
+
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("reference", new THREE.BufferAttribute(references, 2));
+
+  const palette = getStateColors("idle");
   const material = new THREE.ShaderMaterial({
     uniforms: {
       uPosTexture: { value: null },
-      uColorA: { value: new THREE.Color(0x00d4ff) },
-      uColorB: { value: new THREE.Color(0x613187) },
-      uSize: { value: 0.9 }, uTime: { value: 0 },
-      uState: { value: 0 }, uEnergy: { value: 0.15 }, uAudio: { value: 0 }
+      uColorA: { value: palette.primary.clone() },
+      uColorB: { value: palette.secondary.clone() },
+      uSize: { value: 1.0 },
+      uTime: { value: 0 },
+      uState: { value: 0 },
+      uEnergy: { value: currentPresence.energy },
+      uAudio: { value: 0 }
     },
-    vertexShader: vertShader, fragmentShader: fragShader,
-    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false
+    vertexShader: vertShader,
+    fragmentShader: fragShader,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
   });
+
   particleSystem = new THREE.Points(geometry, material);
-  particleSystem.scale.set(1.2, 1.2, 1.2);
+  particleSystem.scale.setScalar(1.16);
   scene.add(particleSystem);
 }
 
-// ═══════════════════════════════════════════
-// ANIMATION LOOP
-// ═══════════════════════════════════════════
+function initCoreMeshes() {
+  const palette = getStateColors("idle");
+
+  coreMesh = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(1.72, 28),
+    new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uAudio: { value: 0 },
+        uEnergy: { value: currentPresence.energy },
+        uColorA: { value: palette.primary.clone() },
+        uColorB: { value: palette.secondary.clone() }
+      },
+      vertexShader: `
+        uniform float uTime;
+        uniform float uAudio;
+        uniform float uEnergy;
+        varying vec3 vNormalDir;
+        varying vec3 vWorldPos;
+
+        void main() {
+          vec3 displaced = position;
+          displaced += normal * (sin(uTime * 1.8 + position.y * 5.0) * 0.05);
+          displaced += normal * (sin(uTime * 3.1 + position.x * 7.0) * 0.025);
+          displaced += normal * (uAudio * 0.08 + uEnergy * 0.05);
+
+          vec4 world = modelMatrix * vec4(displaced, 1.0);
+          vNormalDir = normalize(mat3(modelMatrix) * normal);
+          vWorldPos = world.xyz;
+          gl_Position = projectionMatrix * viewMatrix * world;
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform float uAudio;
+        uniform float uEnergy;
+        uniform vec3 uColorA;
+        uniform vec3 uColorB;
+        varying vec3 vNormalDir;
+        varying vec3 vWorldPos;
+
+        void main() {
+          vec3 viewDir = normalize(cameraPosition - vWorldPos);
+          float fresnel = pow(1.0 - max(dot(viewDir, normalize(vNormalDir)), 0.0), 2.8);
+          float plasma = sin(vWorldPos.y * 5.0 + uTime * 3.5) * 0.5 + 0.5;
+          plasma += sin(vWorldPos.x * 7.0 - uTime * 2.3) * 0.25 + 0.25;
+          plasma = clamp(plasma, 0.0, 1.0);
+
+          vec3 color = mix(uColorB, uColorA, plasma);
+          color += uColorA * fresnel * (0.5 + uAudio * 0.8);
+          color += vec3(0.9, 1.0, 1.0) * pow(fresnel, 4.0) * 0.18;
+
+          float alpha = 0.18 + fresnel * 0.44 + uEnergy * 0.16;
+          gl_FragColor = vec4(color, alpha);
+        }
+      `
+    })
+  );
+  scene.add(coreMesh);
+
+  ringMesh = new THREE.Mesh(
+    new THREE.TorusGeometry(3.35, 0.02, 16, 180),
+    new THREE.MeshBasicMaterial({
+      color: 0x6af0ff,
+      transparent: true,
+      opacity: 0.15,
+      blending: THREE.AdditiveBlending
+    })
+  );
+  ringMesh.rotation.x = Math.PI * 0.42;
+  scene.add(ringMesh);
+
+  shellMesh = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(4.9, 12),
+    new THREE.ShaderMaterial({
+      transparent: true,
+      wireframe: true,
+      depthWrite: false,
+      uniforms: {
+        uTime: { value: 0 },
+        uAudio: { value: 0 },
+        uColor: { value: palette.primary.clone() }
+      },
+      vertexShader: `
+        uniform float uTime;
+        uniform float uAudio;
+        varying float vPulse;
+
+        void main() {
+          vec3 displaced = position + normal * (sin(uTime * 0.8 + position.y * 2.2) * 0.08 + uAudio * 0.08);
+          vPulse = 0.45 + 0.55 * sin(uTime * 1.1 + position.x * 0.7);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 uColor;
+        varying float vPulse;
+
+        void main() {
+          gl_FragColor = vec4(uColor, 0.04 + vPulse * 0.04);
+        }
+      `
+    })
+  );
+  scene.add(shellMesh);
+}
+
+function attachUI() {
+  dom.activateButton.addEventListener("click", () => {
+    void armVoiceCore();
+  });
+}
+
+async function armVoiceCore() {
+  if (audioState.armed) {
+    return;
+  }
+
+  dom.activateButton.disabled = true;
+  dom.activateButton.textContent = "Arming...";
+
+  try {
+    const audioContext = new AudioContext({ latencyHint: "interactive" });
+    await audioContext.resume();
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
+
+    const source = audioContext.createMediaStreamSource(stream);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+    const muteGain = audioContext.createGain();
+    muteGain.gain.value = 0;
+    const outputGain = audioContext.createGain();
+    outputGain.gain.value = 1;
+    outputGain.connect(audioContext.destination);
+
+    source.connect(processor);
+    processor.connect(muteGain);
+    muteGain.connect(audioContext.destination);
+
+    audioState.audioContext = audioContext;
+    audioState.outputGain = outputGain;
+    audioState.processor = processor;
+    audioState.armed = true;
+
+    processor.onaudioprocess = (event) => {
+      handleMicBuffer(event.inputBuffer.getChannelData(0), audioContext.sampleRate);
+    };
+
+    connectSessionSocket();
+
+    dom.activateButton.dataset.armed = "true";
+    dom.activateButton.textContent = "Voice Core Armed";
+    dom.subLine.textContent = "Continuous listening online. Speak naturally and FRIDAY will react in real time.";
+    dom.whisperLine.textContent = "Barge-in is active. Start speaking at any point to cut through playback.";
+  } catch (error) {
+    console.error("FRIDAY voice arm failed", error);
+    dom.leadLine.textContent = "Microphone activation failed.";
+    dom.subLine.textContent = error.message || "Check browser microphone permissions and try again.";
+    dom.activateButton.disabled = false;
+    dom.activateButton.textContent = "Retry Voice Core";
+  }
+}
+
+function handleMicBuffer(floatBuffer, inputSampleRate) {
+  const rms = computeRms(floatBuffer);
+  audioState.micLevel = rms;
+  if (!audioState.armed || !audioState.sessionReady || !sessionSocket || sessionSocket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  const durationMs = (floatBuffer.length / inputSampleRate) * 1000;
+  const aboveThreshold = rms > audioState.threshold;
+
+  if (!audioState.captureActive && aboveThreshold) {
+    audioState.captureActive = true;
+    audioState.silenceMs = 0;
+    audioState.speechMs = 0;
+    if (playbackState.active) {
+      sessionSend({ type: "interrupt" });
+      stopPlayback();
+    }
+  }
+
+  if (!audioState.captureActive) {
+    return;
+  }
+
+  const pcm16 = downsampleToInt16(floatBuffer, inputSampleRate, VOICE_SAMPLE_RATE);
+  sessionSend({
+    type: "audio.frame",
+    audio: bytesToBase64(new Uint8Array(pcm16.buffer)),
+    sample_rate: VOICE_SAMPLE_RATE,
+    rms
+  });
+
+  audioState.speechMs += durationMs;
+  if (aboveThreshold) {
+    audioState.silenceMs = 0;
+  } else {
+    audioState.silenceMs += durationMs;
+  }
+
+  if (audioState.speechMs > 180 && audioState.silenceMs > 520) {
+    sessionSend({ type: "audio.commit" });
+    audioState.captureActive = false;
+    audioState.silenceMs = 0;
+    audioState.speechMs = 0;
+  }
+}
+
+function connectPresenceSocket() {
+  presenceSocket = new WebSocket(PRESENCE_WS_URL);
+  presenceSocket.addEventListener("message", (event) => {
+    const payload = JSON.parse(event.data);
+    if (payload.type === "bootstrap") {
+      applyPresence(payload.presence);
+      return;
+    }
+    if (payload.type === "presence") {
+      applyPresence(payload.data);
+      return;
+    }
+    if (payload.type === "event" && payload.data) {
+      dom.whisperLine.textContent = `${payload.data.source.toUpperCase()} :: ${payload.data.message_type}`;
+    }
+  });
+  presenceSocket.addEventListener("close", () => {
+    window.setTimeout(connectPresenceSocket, 1200);
+  });
+}
+
+function connectSessionSocket() {
+  if (sessionSocket && (sessionSocket.readyState === WebSocket.OPEN || sessionSocket.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+  sessionSocket = new WebSocket(SESSION_WS_URL);
+
+  sessionSocket.addEventListener("open", () => {
+    audioState.sessionReady = false;
+    dom.leadLine.textContent = "Voice transport linked.";
+  });
+
+  sessionSocket.addEventListener("message", (event) => {
+    const payload = JSON.parse(event.data);
+    handleSessionMessage(payload);
+  });
+
+  sessionSocket.addEventListener("close", () => {
+    audioState.sessionReady = false;
+    if (audioState.armed) {
+      dom.leadLine.textContent = "Voice transport reconnecting...";
+      clearTimeout(reconnectTimer);
+      reconnectTimer = window.setTimeout(connectSessionSocket, 1200);
+    }
+  });
+}
+
+function handleSessionMessage(payload) {
+  switch (payload.type) {
+    case "session.ready":
+      audioState.sessionReady = true;
+      dom.leadLine.textContent = "Continuous voice transport active.";
+      dom.subLine.textContent = "FRIDAY is listening locally through the backend session graph.";
+      return;
+    case "transcript.partial":
+      dom.subLine.textContent = payload.text;
+      return;
+    case "transcript.final":
+      dom.leadLine.textContent = `Heard: ${payload.text}`;
+      dom.whisperLine.textContent = "Routing through fast model and background refinement.";
+      return;
+    case "assistant.start":
+      dom.whisperLine.textContent = `Route: ${payload.route || "fast-smart"} | Model: ${payload.model || "local"}`;
+      return;
+    case "assistant.token":
+      dom.subLine.textContent = tailText(payload.text, 160);
+      return;
+    case "assistant.final":
+      dom.leadLine.textContent = payload.text;
+      return;
+    case "assistant.refinement":
+      dom.whisperLine.textContent = payload.text;
+      return;
+    case "assistant.task_complete":
+      dom.leadLine.textContent = payload.text;
+      dom.whisperLine.textContent = "Execution pipeline completed.";
+      return;
+    case "voice.start":
+      playbackState.active = true;
+      playbackState.pendingStop = false;
+      dom.modePill.dataset.mode = "speaking";
+      return;
+    case "voice.chunk":
+      enqueuePlaybackChunk(payload.audio, payload.sample_rate);
+      return;
+    case "voice.end":
+      playbackState.pendingStop = true;
+      return;
+    case "voice.interrupt":
+      stopPlayback();
+      dom.whisperLine.textContent = "Playback interrupted by live speech.";
+      return;
+    case "voice.error":
+      dom.whisperLine.textContent = payload.message || "Voice synthesis fault.";
+      return;
+    default:
+      return;
+  }
+}
+
+function applyPresence(presence) {
+  const mode = normalizeMode(presence.mode);
+  currentPresence.mode = mode;
+  currentPresence.energy = presence.energy ?? currentPresence.energy;
+  currentPresence.whisper = presence.whisper || currentPresence.whisper;
+  currentPresence.headline = presence.headline || currentPresence.headline;
+
+  dom.modePill.dataset.mode = mode;
+  dom.modeLabel.textContent = mode.toUpperCase();
+  dom.modeDot.style.background = getModeColor(mode);
+  dom.modeDot.style.boxShadow = `0 0 12px ${getModeColor(mode)}`;
+
+  if (presence.whisper) {
+    dom.whisperLine.textContent = presence.whisper;
+  }
+  if (presence.terminal_text && !playbackState.active) {
+    dom.subLine.textContent = tailText(presence.terminal_text, 180);
+  }
+}
+
 function animate() {
   requestAnimationFrame(animate);
   const delta = clock.getDelta();
   const elapsed = clock.getElapsedTime();
-  const stateIdx = getStateIndex(currentPresence.mode);
 
-  posVariable.material.uniforms.uTime.value   = elapsed;
-  posVariable.material.uniforms.uDelta.value  = delta;
-  posVariable.material.uniforms.uAudio.value  = audioLevel;
-  posVariable.material.uniforms.uState.value  = stateIdx;
+  playbackState.level = damp(playbackState.level, playbackState.targetLevel, 0.1);
+  playbackState.targetLevel *= 0.9;
+  const totalAudio = Math.max(audioState.micLevel * 0.95, playbackState.level * 1.15);
+
+  posVariable.material.uniforms.uTime.value = elapsed;
+  posVariable.material.uniforms.uDelta.value = delta;
+  posVariable.material.uniforms.uAudio.value = totalAudio;
+  posVariable.material.uniforms.uState.value = stateIndex[currentPresence.mode] ?? 0;
   posVariable.material.uniforms.uEnergy.value = currentPresence.energy;
   gpuCompute.compute();
 
-  const mat = particleSystem.material;
-  mat.uniforms.uPosTexture.value = gpuCompute.getCurrentRenderTarget(posVariable).texture;
-  mat.uniforms.uTime.value    = elapsed;
-  mat.uniforms.uState.value   = stateIdx;
-  mat.uniforms.uEnergy.value  = currentPresence.energy;
-  mat.uniforms.uAudio.value   = audioLevel;
+  const palette = getStateColors(currentPresence.mode);
+  const particleMaterial = particleSystem.material;
+  particleMaterial.uniforms.uPosTexture.value = gpuCompute.getCurrentRenderTarget(posVariable).texture;
+  particleMaterial.uniforms.uTime.value = elapsed;
+  particleMaterial.uniforms.uState.value = stateIndex[currentPresence.mode] ?? 0;
+  particleMaterial.uniforms.uEnergy.value = currentPresence.energy;
+  particleMaterial.uniforms.uAudio.value = totalAudio;
+  particleMaterial.uniforms.uColorA.value.copy(palette.primary);
+  particleMaterial.uniforms.uColorB.value.copy(palette.secondary);
 
-  const colors = getStateColors(currentPresence.mode);
-  mat.uniforms.uColorA.value = colors.primary;
-  mat.uniforms.uColorB.value = colors.secondary;
+  coreMesh.material.uniforms.uTime.value = elapsed;
+  coreMesh.material.uniforms.uAudio.value = totalAudio;
+  coreMesh.material.uniforms.uEnergy.value = currentPresence.energy;
+  coreMesh.material.uniforms.uColorA.value.copy(palette.primary);
+  coreMesh.material.uniforms.uColorB.value.copy(palette.secondary);
 
-  let rotSpeed = 0.002;
-  if (stateIdx === 1) rotSpeed = 0.003;
-  if (stateIdx === 2) rotSpeed = 0.008;
-  if (stateIdx === 3) rotSpeed = 0.004;
-  particleSystem.rotation.y += rotSpeed + audioLevel * 0.01;
-  particleSystem.rotation.x += rotSpeed * 0.2;
+  shellMesh.material.uniforms.uTime.value = elapsed;
+  shellMesh.material.uniforms.uAudio.value = totalAudio;
+  shellMesh.material.uniforms.uColor.value.copy(palette.primary);
 
-  updateLightning(delta, stateIdx);
+  ringMesh.material.color.copy(palette.secondary);
+  ringMesh.material.opacity = 0.08 + currentPresence.energy * 0.12;
 
-  if (composer) {
-    try { composer.updateTime(elapsed); composer.render(); }
-    catch (e) { renderer.render(scene, camera); }
-  } else {
-    renderer.render(scene, camera);
-  }
+  particleSystem.rotation.y += 0.0025 + totalAudio * 0.008;
+  particleSystem.rotation.x = Math.sin(elapsed * 0.18) * 0.12;
+  coreMesh.rotation.y -= 0.003 + currentPresence.energy * 0.005;
+  coreMesh.rotation.z = Math.sin(elapsed * 0.35) * 0.08;
+  shellMesh.rotation.y += 0.001 + currentPresence.energy * 0.002;
+  shellMesh.rotation.x = Math.cos(elapsed * 0.12) * 0.16;
+  ringMesh.rotation.z += 0.002 + currentPresence.energy * 0.003;
+  ringMesh.rotation.y = Math.sin(elapsed * 0.2) * 0.5;
+
+  wisps.update(currentPresence, delta);
+
+  updateMeters();
+  composer.updateTime(elapsed);
+  composer.render();
 }
 
-// ═══════════════════════════════════════════
-// STATE MAPPING
-// ═══════════════════════════════════════════
-function getStateIndex(mode) {
-  return { idle: 0, listening: 1, thinking: 2, responding: 3, error: 4 }[mode] ?? 0;
-}
-
-function getStateColors(mode) {
-  const map = {
-    idle:       { primary: new THREE.Color(0x00d4ff), secondary: new THREE.Color(0x613187) },
-    listening:  { primary: new THREE.Color(0x00ffff), secondary: new THREE.Color(0x8844cc) },
-    thinking:   { primary: new THREE.Color(0x3366ff), secondary: new THREE.Color(0x0022aa) },
-    responding: { primary: new THREE.Color(0x22ffcc), secondary: new THREE.Color(0x00d4ff) },
-    error:      { primary: new THREE.Color(0xff2244), secondary: new THREE.Color(0x613187) }
-  };
-  return map[mode] || map.idle;
-}
-
-function updatePresenceUI(data) {
-  const mode = data.mode || 'idle';
-  currentPresence = data;
-
-  // Update status pill
-  if (presenceModeEl) presenceModeEl.textContent = mode.toUpperCase();
-  if (statusPillEl) statusPillEl.setAttribute('data-state', mode);
-
-  // Update status dot color
-  if (statusDotEl) {
-    const dotColors = { idle: '#00d4ff', listening: '#00ffff', thinking: '#3366ff', responding: '#22ffcc', error: '#ff2244' };
-    statusDotEl.style.background = dotColors[mode] || dotColors.idle;
-    statusDotEl.style.boxShadow = `0 0 6px ${dotColors[mode] || dotColors.idle}`;
-  }
-}
-
-// ═══════════════════════════════════════════
-// AUDIO INPUT
-// ═══════════════════════════════════════════
-async function setupAudio() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const ctx = new AudioContext();
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 256;
-    ctx.createMediaStreamSource(stream).connect(analyser);
-    const buf = new Uint8Array(analyser.frequencyBinCount);
-    const update = () => {
-      analyser.getByteFrequencyData(buf);
-      let sum = 0;
-      for (let i = 0; i < buf.length; i++) sum += buf[i];
-      audioLevel = (sum / buf.length) / 255;
-      requestAnimationFrame(update);
-    };
-    update();
-  } catch (e) {
-    console.warn('FRIDAY: Audio visualization unavailable', e);
-  }
-}
-
-// ═══════════════════════════════════════════
-// CONVERSATION RENDERING
-// ═══════════════════════════════════════════
-function addChatMessage(role, text) {
-  if (!conversationListEl || !text) return;
-
-  const msg = document.createElement('div');
-  msg.className = `chat-msg ${role}`;
-
-  const label = document.createElement('div');
-  label.className = 'msg-label';
-  label.textContent = role === 'user' ? 'YOU' : 'FRIDAY';
-
-  const bubble = document.createElement('div');
-  bubble.className = 'msg-bubble';
-
-  if (role === 'friday') {
-    // Typewriter effect for FRIDAY's responses
-    typewriterBubble(bubble, text);
-  } else {
-    bubble.textContent = text;
-  }
-
-  msg.appendChild(label);
-  msg.appendChild(bubble);
-  conversationListEl.appendChild(msg);
-
-  // Scroll to bottom
-  const panel = document.getElementById('conversation-panel');
-  if (panel) {
-    requestAnimationFrame(() => {
-      panel.scrollTop = panel.scrollHeight;
-    });
-  }
-}
-
-function typewriterBubble(element, text) {
-  element.textContent = '';
-  let i = 0;
-  const speed = 12;
-  if (element._typeInterval) clearInterval(element._typeInterval);
-  element._typeInterval = setInterval(() => {
-    if (i < text.length) {
-      element.textContent += text.charAt(i);
-      i++;
-      // Auto scroll
-      const panel = document.getElementById('conversation-panel');
-      if (panel) panel.scrollTop = panel.scrollHeight;
-    } else {
-      clearInterval(element._typeInterval);
-    }
-  }, speed);
-}
-
-function showTypingIndicator() {
-  if (!conversationListEl) return;
-  // Remove existing typing indicator
-  removeTypingIndicator();
-
-  const msg = document.createElement('div');
-  msg.className = 'chat-msg friday';
-  msg.id = 'typing-msg';
-
-  const label = document.createElement('div');
-  label.className = 'msg-label';
-  label.textContent = 'FRIDAY';
-
-  const indicator = document.createElement('div');
-  indicator.className = 'typing-indicator';
-  indicator.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
-
-  msg.appendChild(label);
-  msg.appendChild(indicator);
-  conversationListEl.appendChild(msg);
-
-  const panel = document.getElementById('conversation-panel');
-  if (panel) panel.scrollTop = panel.scrollHeight;
-}
-
-function removeTypingIndicator() {
-  const existing = document.getElementById('typing-msg');
-  if (existing) existing.remove();
-}
-
-// ═══════════════════════════════════════════
-// VOICE SYSTEM (Always-On Wake Word)
-// ═══════════════════════════════════════════
-
-function initVoiceSystem() {
-  if (!micToggleBtn) return;
-
-  // Warm up speech synthesis
-  if (synth) {
-    try { synth.getVoices(); } catch (e) {}
-    // Voices may load async
-    if (speechSynthesis.onvoiceschanged !== undefined) {
-      speechSynthesis.onvoiceschanged = () => { synth.getVoices(); };
-    }
-  }
-
-  // Setup speech recognition
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (SpeechRecognition) {
-    recognition = new SpeechRecognition();
-    recognition.continuous = true;       // Always listening
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-
-    recognition.onstart = () => {
-      isListening = true;
-      micToggleBtn.classList.add('active');
-      if (voiceIndicatorEl) voiceIndicatorEl.classList.add('listening');
-      if (voiceStatusEl) voiceStatusEl.innerHTML = 'Listening... say <strong>"Friday"</strong> to activate';
-    };
-
-    recognition.onresult = (event) => {
-      let finalTranscript = '';
-      let interimTranscript = '';
-
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
-        } else {
-          interimTranscript += event.results[i][0].transcript;
-        }
-      }
-
-      // Show interim text
-      if (interimTranscript && voiceStatusEl) {
-        voiceStatusEl.textContent = `Hearing: "${interimTranscript}"`;
-      }
-
-      if (finalTranscript) {
-        const cleaned = finalTranscript.trim();
-        // Check for wake word "Friday" at the start
-        const wakeWordPattern = /^(hey\s+)?friday[,.\s]*/i;
-        const match = cleaned.match(wakeWordPattern);
-
-        if (match) {
-          // Strip wake word and send the rest
-          const command = cleaned.replace(wakeWordPattern, '').trim();
-          if (command) {
-            submitObjective(command, 'voice');
-          } else {
-            // Just said "Friday" with nothing else — acknowledge
-            submitObjective('Hello', 'voice');
-          }
-        } else if (isContinuousMode) {
-          // If mic button was manually pressed, send everything
-          submitObjective(cleaned, 'voice');
-        }
-
-        if (voiceStatusEl) {
-          voiceStatusEl.innerHTML = 'Listening... say <strong>"Friday"</strong> to activate';
-        }
-      }
-    };
-
-    recognition.onerror = (event) => {
-      if (event.error !== 'no-speech') {
-        console.error('FRIDAY: Speech recognition error', event.error);
-      }
-      // Auto-restart on non-fatal errors
-      if (event.error === 'no-speech' || event.error === 'aborted') {
-        restartListening();
-      }
-    };
-
-    recognition.onend = () => {
-      // Auto-restart continuous listening
-      if (isListening) {
-        restartListening();
-      }
-    };
-
-    // Start listening automatically
-    startListening();
-  } else {
-    micToggleBtn.style.display = 'none';
-    if (voiceStatusEl) voiceStatusEl.textContent = 'Voice not supported in this browser';
-  }
-
-  // Manual mic toggle for continuous mode (send all speech, not just wake-word)
-  micToggleBtn.addEventListener('click', () => {
-    if (isContinuousMode) {
-      isContinuousMode = false;
-      micToggleBtn.classList.remove('active');
-      if (voiceStatusEl) voiceStatusEl.innerHTML = 'Listening... say <strong>"Friday"</strong> to activate';
-    } else {
-      isContinuousMode = true;
-      micToggleBtn.classList.add('active');
-      if (voiceStatusEl) voiceStatusEl.textContent = 'Open mic — all speech will be sent';
-      if (!isListening) startListening();
-    }
-  });
-}
-
-function startListening() {
-  try {
-    recognition.start();
-    isListening = true;
-  } catch (e) {
-    // Already started
-  }
-}
-
-function restartListening() {
-  setTimeout(() => {
-    try {
-      recognition.start();
-    } catch (e) {
-      // Already running
-    }
-  }, 300);
-}
-
-// ═══════════════════════════════════════════
-// SPEECH SYNTHESIS (FRIDAY's Voice)
-// ═══════════════════════════════════════════
-function speakText(text) {
-  if (!text || !synth) return;
-
-  // Don't re-speak the same text
-  const textKey = text.substring(0, 100);
-  if (spokenTexts.has(textKey)) return;
-  spokenTexts.add(textKey);
-  // Prevent memory leak
-  if (spokenTexts.size > 50) {
-    const first = spokenTexts.values().next().value;
-    spokenTexts.delete(first);
-  }
-
-  synth.cancel();
-
-  const utterance = new SpeechSynthesisUtterance(text);
-
-  const voices = synth.getVoices();
-  // Priority: Irish Female → UK English Female → Zira → any Female → first available
-  const preferredVoice =
-    voices.find(v => /irish/i.test(v.name) && /female/i.test(v.name)) ||
-    voices.find(v => /uk english female/i.test(v.name)) ||
-    voices.find(v => /zira/i.test(v.name)) ||
-    voices.find(v => /female/i.test(v.name)) ||
-    voices.find(v => /hazel/i.test(v.name)) ||
-    voices.find(v => /samantha/i.test(v.name)) ||
-    voices[0];
-
-  if (preferredVoice) utterance.voice = preferredVoice;
-
-  utterance.pitch = 1.05;
-  utterance.rate  = 1.05;
-
-  utterance.onstart = () => {
-    currentPresence.mode = 'responding';
-    updatePresenceUI(currentPresence);
-  };
-
-  utterance.onend = () => {
-    // Don't force idle here — let WebSocket presence handle it
-  };
-
-  synth.speak(utterance);
-}
-
-// ═══════════════════════════════════════════
-// WEBSOCKET (Bidirectional)
-// ═══════════════════════════════════════════
-function connectWebSocket() {
-  try {
-    wsSocket = new WebSocket(WS_URL);
-
-    wsSocket.onopen = () => {
-      if (statConnectionEl) {
-        statConnectionEl.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12"><circle cx="12" cy="12" r="5" fill="currentColor"/></svg> CONNECTED';
-        statConnectionEl.style.color = '';
-      }
-    };
-
-    wsSocket.onmessage = (event) => {
-      const payload = JSON.parse(event.data);
-
-      // ── Presence updates ──
-      if (payload.type === 'presence' || payload.type === 'bootstrap') {
-        const data = payload.type === 'presence' ? payload.data : payload.presence;
-        updatePresenceUI(data);
-
-        if (data.mode === 'thinking') {
-          showTypingIndicator();
-        } else {
-          removeTypingIndicator();
-        }
-
-        // Speak FRIDAY's terminal text when responding
-        if (data.terminal_text && data.mode === 'responding') {
-          speakText(data.terminal_text);
-        }
-      }
-
-      // ── Conversation messages ──
-      if (payload.type === 'conversation') {
-        removeTypingIndicator();
-        addChatMessage(payload.data.role, payload.data.text);
-
-        // Speak FRIDAY's response
-        if (payload.data.role === 'friday') {
-          speakText(payload.data.text);
-        }
-      }
-
-      // ── Bootstrap: load existing conversation ──
-      if (payload.type === 'bootstrap' && payload.conversation) {
-        payload.conversation.forEach(entry => {
-          addChatMessage(entry.role, entry.text);
-        });
-      }
-
-      // ── Telemetry events ──
-      if (payload.type === 'event' && feedListEl) {
-        const item = document.createElement('div');
-        item.className = 'feed-item';
-        item.innerHTML = `<span class="source">${payload.data.source.toUpperCase()}</span> ${payload.data.message_type}`;
-        feedListEl.prepend(item);
-        if (feedListEl.children.length > 20) feedListEl.removeChild(feedListEl.lastChild);
-      }
-    };
-
-    wsSocket.onclose = () => {
-      wsSocket = null;
-      if (statConnectionEl) {
-        statConnectionEl.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12"><circle cx="12" cy="12" r="5" fill="currentColor"/></svg> RECONNECTING...';
-        statConnectionEl.style.color = '#ff9900';
-      }
-      setTimeout(connectWebSocket, 2000);
-    };
-
-    wsSocket.onerror = () => {};
-  } catch (e) {
-    setTimeout(connectWebSocket, 2000);
-  }
-}
-
-// ═══════════════════════════════════════════
-// SUBMIT OBJECTIVE (via WebSocket)
-// ═══════════════════════════════════════════
-function submitObjective(text, source = 'text') {
-  if (!text || !text.trim()) return;
-  const objective = text.trim();
-
-  // Immediately show user message in conversation
-  addChatMessage('user', objective);
-
-  // Show typing indicator
-  showTypingIndicator();
-
-  // Send via WebSocket if connected, else fallback to HTTP
-  if (wsSocket && wsSocket.readyState === WebSocket.OPEN) {
-    wsSocket.send(JSON.stringify({
-      type: 'objective',
-      text: objective,
-      context: { source: `frontend-3d-core-${source}` }
-    }));
-  } else {
-    // HTTP fallback
-    fetch(`${API_URL}/api/objectives/submit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ objective, context: { source: `frontend-3d-core-${source}` } })
-    }).catch(err => console.error('FRIDAY: Dispatch error', err));
-  }
-}
-
-// ═══════════════════════════════════════════
-// FORM SUBMIT
-// ═══════════════════════════════════════════
-function handleFormSubmit(e) {
-  e.preventDefault();
-  const text = inputEl.value.trim();
-  if (!text) return;
-  inputEl.value = '';
-  submitObjective(text, 'text');
-}
-
-// ═══════════════════════════════════════════
-// RESIZE
-// ═══════════════════════════════════════════
 function onWindowResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-  if (composer) composer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function sessionSend(payload) {
+  if (!sessionSocket || sessionSocket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  sessionSocket.send(JSON.stringify(payload));
+}
+
+function enqueuePlaybackChunk(base64Audio, sampleRate) {
+  if (!audioState.audioContext || !audioState.outputGain) {
+    return;
+  }
+  const bytes = base64ToBytes(base64Audio);
+  const sampleCount = bytes.byteLength / 2;
+  const buffer = audioState.audioContext.createBuffer(1, sampleCount, sampleRate);
+  const channel = buffer.getChannelData(0);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let sum = 0;
+  for (let i = 0; i < sampleCount; i += 1) {
+    const sample = view.getInt16(i * 2, true) / 32768;
+    channel[i] = sample;
+    sum += sample * sample;
+  }
+  playbackState.targetLevel = Math.max(playbackState.targetLevel, Math.sqrt(sum / Math.max(sampleCount, 1)));
+
+  const source = audioState.audioContext.createBufferSource();
+  source.buffer = buffer;
+  source.connect(audioState.outputGain);
+
+  const now = audioState.audioContext.currentTime + 0.02;
+  playbackState.nextStart = Math.max(playbackState.nextStart, now);
+  source.start(playbackState.nextStart);
+  playbackState.nextStart += buffer.duration;
+  playbackState.sources.add(source);
+
+  source.onended = () => {
+    playbackState.sources.delete(source);
+    if (playbackState.pendingStop && playbackState.sources.size === 0) {
+      playbackState.active = false;
+      playbackState.pendingStop = false;
+      playbackState.nextStart = audioState.audioContext.currentTime;
+    }
+  };
+}
+
+function stopPlayback() {
+  playbackState.sources.forEach((source) => {
+    try {
+      source.stop(0);
+    } catch {
+      // Source may already be finished.
+    }
+  });
+  playbackState.sources.clear();
+  playbackState.active = false;
+  playbackState.pendingStop = false;
+  playbackState.level = 0;
+  playbackState.targetLevel = 0;
+  if (audioState.audioContext) {
+    playbackState.nextStart = audioState.audioContext.currentTime;
+  }
+}
+
+function updateMeters() {
+  dom.micBar.style.transform = `scaleX(${Math.min(1, 0.12 + audioState.micLevel * 4.2)})`;
+  dom.voiceBar.style.transform = `scaleX(${Math.min(1, 0.12 + playbackState.level * 4.8)})`;
+}
+
+function computeRms(buffer) {
+  let sum = 0;
+  for (let i = 0; i < buffer.length; i += 1) {
+    const value = buffer[i];
+    sum += value * value;
+  }
+  return Math.sqrt(sum / Math.max(buffer.length, 1));
+}
+
+function downsampleToInt16(buffer, inputRate, outputRate) {
+  if (outputRate > inputRate) {
+    throw new Error("Output sample rate cannot exceed input sample rate.");
+  }
+  const sampleRateRatio = inputRate / outputRate;
+  const newLength = Math.round(buffer.length / sampleRateRatio);
+  const result = new Int16Array(newLength);
+  let offsetResult = 0;
+  let offsetBuffer = 0;
+  while (offsetResult < result.length) {
+    const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+    let accum = 0;
+    let count = 0;
+    for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i += 1) {
+      accum += buffer[i];
+      count += 1;
+    }
+    const sample = Math.max(-1, Math.min(1, accum / Math.max(count, 1)));
+    result[offsetResult] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+    offsetResult += 1;
+    offsetBuffer = nextOffsetBuffer;
+  }
+  return result;
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(base64Text) {
+  const binary = atob(base64Text);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function tailText(text, maxLength) {
+  if (!text) {
+    return "";
+  }
+  return text.length > maxLength ? `...${text.slice(-maxLength)}` : text;
+}
+
+function damp(value, target, factor) {
+  return value + (target - value) * factor;
+}
+
+function normalizeMode(mode) {
+  if (mode === "responding") {
+    return "speaking";
+  }
+  return mode in stateIndex ? mode : "idle";
+}
+
+function getModeColor(mode) {
+  const colors = {
+    idle: "#58d9ff",
+    listening: "#83ffe2",
+    thinking: "#79a9ff",
+    speaking: "#f7fffb",
+    executing: "#9afff3",
+    error: "#ff5f75"
+  };
+  return colors[mode] || colors.idle;
+}
+
+function getStateColors(mode) {
+  const palette = {
+    idle: { primary: new THREE.Color("#4fdcff"), secondary: new THREE.Color("#1f95d2") },
+    listening: { primary: new THREE.Color("#83ffe2"), secondary: new THREE.Color("#29c6bb") },
+    thinking: { primary: new THREE.Color("#79a9ff"), secondary: new THREE.Color("#2848d7") },
+    speaking: { primary: new THREE.Color("#f4fffd"), secondary: new THREE.Color("#5de6d6") },
+    executing: { primary: new THREE.Color("#8cfffa"), secondary: new THREE.Color("#d9fff5") },
+    error: { primary: new THREE.Color("#ff5f75"), secondary: new THREE.Color("#941d41") }
+  };
+  return palette[mode] || palette.idle;
 }

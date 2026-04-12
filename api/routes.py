@@ -73,7 +73,8 @@ async def frontend_meta(request: Request) -> ApiEnvelope:
     return ApiEnvelope(
         data={
             "active_mode": settings.frontend_mode.value,
-            "available_modes": ["particles", "antigravity"],
+            "available_modes": ["3d-core", "particles", "antigravity"],
+            "three_d_core_url": f"http://{settings.three_d_core_host}:{settings.three_d_core_port}",
             "particles_url": f"http://{settings.particles_host}:{settings.particles_port}",
             "antigravity_url": f"http://{settings.antigravity_host}:{settings.antigravity_port}",
             "api_url": f"http://{settings.host}:{settings.port}",

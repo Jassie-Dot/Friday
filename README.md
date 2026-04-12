@@ -4,14 +4,15 @@ FRIDAY is a local-first multi-agent AI operating system. All reasoning runs on l
 
 ## What This Repo Contains
 
-- `core/`: runtime config, Ollama client, orchestration, realtime presence state, and event bus
+- `core/`: runtime config, Ollama client, hybrid intelligence router, voice session manager, orchestration, realtime presence state, and event bus
 - `agents/`: planner, executor, debug, memory, web, system, vision, and voice agents
 - `tools/`: shell, Python, filesystem, browser, web, image, voice, and system tool adapters
 - `memory/`: Chroma-backed semantic memory with pluggable embeddings
 - `web_agent/`: higher-level search, scrape, and summarize workflow
 - `system_control/`: system action helpers
 - `api/`: FastAPI REST and WebSocket entrypoints
-- `frontend-particles/`: primary Three.js realtime particle presence interface
+- `frontend-3d-core/`: primary voice-first plasma core interface with backend-driven audio streaming
+- `frontend-particles/`: alternate lightweight Three.js realtime particle presence interface
 - `frontend-antigravity/`: alternate command-first frontend
 - `logs/`: runtime logs and task history
 
@@ -24,7 +25,9 @@ FRIDAY is a local-first multi-agent AI operating system. All reasoning runs on l
 - Web-aware execution through dedicated web tooling
 - Permission-gated filesystem, shell, and app control
 - Realtime presence state broadcast over WebSockets
-- Dual frontend mode: particles or antigravity
+- Dedicated voice session socket for PCM uplink and streamed TTS downlink
+- Prompt evolution store that can promote higher-scoring prompt variants over time
+- Triple frontend mode: 3d-core, particles, or antigravity
 
 ## Requirements
 
@@ -59,7 +62,7 @@ The launcher will:
 - launch the backend API
 - launch the selected frontend
 
-Default frontend mode is `particles`. To switch:
+Default frontend mode is `3d-core`. To switch:
 
 ```env
 FRIDAY_FRONTEND_MODE=antigravity
@@ -87,6 +90,9 @@ ollama pull mistral:7b
 ### 3. Frontend dependencies
 
 ```powershell
+cd frontend-3d-core
+npm install
+cd ..
 cd frontend-particles
 npm install
 cd ..\frontend-antigravity
@@ -104,11 +110,13 @@ Important variables:
 
 - `FRIDAY_HOST` / `FRIDAY_PORT`
 - `FRIDAY_FRONTEND_MODE`
+- `FRIDAY_3D_CORE_HOST` / `FRIDAY_3D_CORE_PORT`
 - `FRIDAY_PARTICLES_PORT`
 - `FRIDAY_ANTIGRAVITY_PORT`
 - `FRIDAY_PRIMARY_MODEL`
 - `FRIDAY_FAST_MODEL`
 - `FRIDAY_STABLE_DIFFUSION_MODEL_PATH`
+- `FRIDAY_PIPER_MODEL_PATH`
 
 ### 5. Run backend
 
@@ -117,6 +125,14 @@ friday-api
 ```
 
 ### 6. Run a frontend
+
+3D core interface:
+
+```powershell
+cd frontend-3d-core
+$env:VITE_FRIDAY_API_URL="http://127.0.0.1:8000"
+npm run dev -- --host 127.0.0.1 --port 3001
+```
 
 Particle interface:
 
@@ -142,6 +158,7 @@ npm run dev
 - Queue objective: `POST /api/objectives/submit`
 - Presence state: `GET /api/state`
 - WebSocket stream: `ws://127.0.0.1:8000/ws/presence`
+- Voice session stream: `ws://127.0.0.1:8000/ws/session`
 
 Example objective:
 
@@ -151,9 +168,19 @@ curl -X POST http://127.0.0.1:8000/api/objectives/run \
   -d "{\"objective\":\"Search for local OCR libraries, compare them, and summarize the best option for offline deployment.\"}"
 ```
 
+## 3D Core Interface
+
+The primary frontend is a full-screen voice-only plasma core. It includes:
+
+- backend-owned voice sessions over WebSockets
+- continuous microphone capture with client-side VAD and barge-in
+- streamed local TTS playback from the backend
+- GPU particle simulation, plasma shell, and orbiting wisps driven by AI state
+- minimal HUD overlays for mode, transcript, and transport status
+
 ## Particle Interface
 
-The primary frontend is a full-screen Three.js presence field. It includes:
+The alternate particle frontend remains available and includes:
 
 - 6200 GPU-rendered particles
 - shader-driven state transitions for idle, listening, thinking, responding, and error

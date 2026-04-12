@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     frontend_mode: FrontendMode = FrontendMode.three_d_core
+    three_d_core_host: str = "127.0.0.1"
+    three_d_core_port: int = 3001
     particles_host: str = "127.0.0.1"
     particles_port: int = 5173
     antigravity_host: str = "127.0.0.1"
@@ -29,6 +31,8 @@ class Settings(BaseSettings):
     primary_model: str = "deepseek-r1:8b"
     fast_model: str = "mistral:7b"
     model_temperature: float = 0.2
+    intelligence_cache_ttl_seconds: int = 3600
+    speculative_refinement_window_ms: int = 1800
 
     embedding_backend: str = "hash"
     embedding_model_path: str | None = None
@@ -46,8 +50,15 @@ class Settings(BaseSettings):
     ddg_max_results: int = 5
     stable_diffusion_model_path: str | None = None
     whisper_model_size: str = "base"
+    whisper_device: str = "auto"
+    whisper_compute_type: str = "auto"
+    voice_sample_rate: int = 16000
+    tts_sample_rate: int = 22050
+    partial_transcription_window_ms: int = 1400
     piper_model_path: str | None = None
+    piper_binary: str = "piper"
     microphone_device: str | None = None
+    evolution_enabled: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -70,6 +81,8 @@ class Settings(BaseSettings):
 
     @property
     def frontend_dir(self) -> Path:
+        if self.frontend_mode == FrontendMode.three_d_core:
+            return self.workspace_root / "frontend-3d-core"
         if self.frontend_mode == FrontendMode.antigravity:
             return self.workspace_root / "frontend-antigravity"
         return self.workspace_root / "frontend-particles"

@@ -42,6 +42,7 @@ class ChatAgent(BaseAgent):
 
     async def run(self, context: AgentContext) -> AgentResponse:
         await self.emit(context.task_id, "chat_started", {"objective": context.objective})
+        system_prompt, variant_id = self.resolve_prompt("chat.system", self.SYSTEM_PROMPT)
 
         # Build memory context
         memories_block = "\n".join(
@@ -49,7 +50,7 @@ class ChatAgent(BaseAgent):
         ) if context.memories else ""
 
         messages = [
-            {"role": "system", "content": self.SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
         ]
 
         # Inject session history as proper multi-turn conversation
@@ -78,7 +79,7 @@ class ChatAgent(BaseAgent):
         return AgentResponse(
             success=True,
             summary=raw.strip()[:2000],
-            data={"response": raw.strip()},
+            data={"response": raw.strip(), "prompt_variant_id": variant_id},
             memory_entries=[
                 {
                     "document": f"Chat about '{context.objective}': {raw.strip()[:500]}",

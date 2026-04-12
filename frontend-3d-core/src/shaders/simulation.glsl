@@ -181,7 +181,7 @@ void main() {
   }
 
   // =============================================
-  // RESPONDING: Plasma Jets / Solar Wind
+  // SPEAKING: Plasma Jets / Solar Wind
   // Particles stream outward in focused beams from
   // the poles, creating bi-directional plasma jets.
   // Equatorial ring expands with voice waves.
@@ -216,6 +216,29 @@ void main() {
 
     // Audio modulates jet intensity
     pos.y += sign(pos.y + 0.00001) * uAudio * polarity * 0.08;
+  }
+
+  // =============================================
+  // EXECUTING: Compression Bursts
+  // Particles tighten, discharge, and release
+  // with rapid spikes of mechanical precision.
+  // =============================================
+  else if(uState < 4.5) {
+    float targetR = 2.6 + sin(uTime * 6.0) * 0.2;
+    pos += dir * (targetR - dist) * 0.028;
+
+    float compression = smoothstep(0.0, 1.0, sin(uTime * 9.0 + id * 8.0) * 0.5 + 0.5);
+    pos += dir * (compression - 0.45) * 0.08;
+
+    float burstGate = step(0.78, fract(uTime * 2.8 + id * 17.0));
+    pos += dir * burstGate * 0.18;
+
+    vec3 eddy = curlNoise(pos * 0.9 + uTime * 0.22) * 0.12;
+    pos += eddy * 0.06;
+
+    float orbitAngle = 0.014 + id * 0.004;
+    mat2 rot = mat2(cos(orbitAngle), -sin(orbitAngle), sin(orbitAngle), cos(orbitAngle));
+    pos.xz = rot * pos.xz;
   }
 
   // =============================================

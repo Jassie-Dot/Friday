@@ -8,7 +8,8 @@
       "Bash(netstat -ano)",
       "Bash(taskkill //F //PID 22788)",
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('OK' if d.get\\('ok'\\) else 'FAIL'\\)\")",
-      "Bash(curl -s http://127.0.0.1:8000/api/agents)"
+      "Bash(curl -s http://127.0.0.1:8000/api/agents)",
+      "Bash(curl -s http://127.0.0.1:11434/api/tags)"
     ]
   }
 }

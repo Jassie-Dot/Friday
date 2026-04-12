@@ -12,9 +12,19 @@ logger = logging.getLogger(__name__)
 class PlannerAgent(BaseAgent):
     name = AgentName.planner
     description = "Breaks objectives into structured steps for specialist agents."
+    SYSTEM_PROMPT = (
+        "You are FRIDAY's mission planner - the tactical brain of an Iron Man AI companion. "
+        "Break the Boss's objective into precise executable steps. Return JSON only with "
+        '{"reasoning":"...", "steps":[{"title":"...", "agent":"chat", "goal":"...", "inputs":{}, "expected_output":"..."}]}. '
+        "The 'agent' MUST be exactly one of: chat, executor, web, vision, voice, system. "
+        "Use 'chat' for greetings, questions, general conversation, and explanations. "
+        "Keep the plan concrete, safe, and under 8 steps. "
+        "For simple conversational requests, use exactly ONE chat step."
+    )
 
     async def run(self, context: AgentContext) -> AgentResponse:
         await self.emit(context.task_id, "planning_started", {"objective": context.objective})
+        system_prompt, variant_id = self.resolve_prompt("planner.system", self.SYSTEM_PROMPT)
         payload = {
             "objective": context.objective,
             "context": context.task_context,
@@ -31,19 +41,7 @@ class PlannerAgent(BaseAgent):
         try:
             result = await self.fast_llm.json_response(
                 [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are FRIDAY's mission planner — the tactical brain of an Iron Man AI companion. "
-                            "Break the Boss's objective into precise executable steps. Return JSON only with "
-                            '{"reasoning":"...", "steps":[{"title":"...", "agent":"chat", '
-                            '"goal":"...", "inputs":{}, "expected_output":"..."}]}. '
-                            "The 'agent' MUST be exactly one of: chat, executor, web, vision, voice, system. "
-                            "Use 'chat' for greetings, questions, general conversation, and explanations. "
-                            "Keep the plan concrete, safe, and under 8 steps. "
-                            "For simple conversational requests, use exactly ONE chat step."
-                        ),
-                    },
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=True)},
                 ]
             )
@@ -60,7 +58,7 @@ class PlannerAgent(BaseAgent):
         return AgentResponse(
             success=True,
             summary=f"Created a {len(plan.steps)} step plan.",
-            data={"plan": plan.model_dump(mode="json")},
+            data={"plan": plan.model_dump(mode="json"), "prompt_variant_id": variant_id},
             memory_entries=[
                 {
                     "document": f"Plan for '{context.objective}': {plan.reasoning}",
@@ -73,16 +71,63 @@ class PlannerAgent(BaseAgent):
         lower = objective.lower()
         steps: list[TaskStep] = []
         if any(token in lower for token in ("search", "research", "scrape", "web", "internet", "browse")):
-            steps.append(TaskStep(title="Gather web intelligence", agent=AgentName.web, goal=objective, inputs={"query": objective}, expected_output="Web findings and source-aware summary."))
+            steps.append(
+                TaskStep(
+                    title="Gather web intelligence",
+                    agent=AgentName.web,
+                    goal=objective,
+                    inputs={"query": objective},
+                    expected_output="Web findings and source-aware summary.",
+                )
+            )
         if any(token in lower for token in ("image", "visual", "art", "render", "draw", "picture")):
-            steps.append(TaskStep(title="Generate image output", agent=AgentName.vision, goal=objective, inputs={"prompt": objective}, expected_output="Generated image files."))
+            steps.append(
+                TaskStep(
+                    title="Generate image output",
+                    agent=AgentName.vision,
+                    goal=objective,
+                    inputs={"prompt": objective},
+                    expected_output="Generated image files.",
+                )
+            )
         if any(token in lower for token in ("transcribe", "dictation", "record audio")):
-            steps.append(TaskStep(title="Handle voice task", agent=AgentName.voice, goal=objective, inputs={}, expected_output="Voice transcription or speech output."))
+            steps.append(
+                TaskStep(
+                    title="Handle voice task",
+                    agent=AgentName.voice,
+                    goal=objective,
+                    inputs={},
+                    expected_output="Voice transcription or speech output.",
+                )
+            )
         if any(token in lower for token in ("browser", "open app", "launch", "automation")):
-            steps.append(TaskStep(title="Perform system action", agent=AgentName.system, goal=objective, inputs={}, expected_output="OS action completed safely."))
+            steps.append(
+                TaskStep(
+                    title="Perform system action",
+                    agent=AgentName.system,
+                    goal=objective,
+                    inputs={},
+                    expected_output="OS action completed safely.",
+                )
+            )
         if any(token in lower for token in ("run", "execute", "script", "code", "compile", "build", "install")):
-            steps.append(TaskStep(title="Execute local task", agent=AgentName.executor, goal=objective, inputs={}, expected_output="Objective completed locally."))
+            steps.append(
+                TaskStep(
+                    title="Execute local task",
+                    agent=AgentName.executor,
+                    goal=objective,
+                    inputs={},
+                    expected_output="Objective completed locally.",
+                )
+            )
         if not steps:
-            # Default: treat as conversational
-            steps.append(TaskStep(title="Respond to user", agent=AgentName.chat, goal=objective, inputs={}, expected_output="A helpful conversational response."))
+            steps.append(
+                TaskStep(
+                    title="Respond to user",
+                    agent=AgentName.chat,
+                    goal=objective,
+                    inputs={},
+                    expected_output="A helpful conversational response.",
+                )
+            )
         return TaskPlan(objective=objective, reasoning="Heuristic fallback plan generated without model output.", steps=steps)

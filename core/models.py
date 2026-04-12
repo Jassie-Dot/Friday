@@ -16,6 +16,8 @@ def utc_now() -> datetime:
 class AgentName(str, Enum):
     planner = "planner"
     executor = "executor"
+    critic = "critic"
+    evolution = "evolution"
     debug = "debug"
     memory = "memory"
     web = "web"
@@ -45,7 +47,8 @@ class PresenceMode(str, Enum):
     idle = "idle"
     listening = "listening"
     thinking = "thinking"
-    responding = "responding"
+    speaking = "speaking"
+    executing = "executing"
     error = "error"
 
 
@@ -89,6 +92,31 @@ class StepExecution(BaseModel):
     completed_at: datetime | None = None
 
 
+class TaskMetrics(BaseModel):
+    queue_ms: float = 0.0
+    planning_ms: float = 0.0
+    execution_ms: float = 0.0
+    total_ms: float = 0.0
+    first_response_ms: float = 0.0
+    cache_hit: bool = False
+    routed_model: str = ""
+    interrupted: bool = False
+
+
+class TaskCritique(BaseModel):
+    score: float = 0.5
+    strengths: list[str] = Field(default_factory=list)
+    issues: list[str] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+
+
+class EvolutionNote(BaseModel):
+    prompt_key: str | None = None
+    variant_id: str | None = None
+    summary: str = ""
+    suggested_upgrades: list[str] = Field(default_factory=list)
+
+
 class ObjectiveRequest(BaseModel):
     objective: str
     context: dict[str, Any] = Field(default_factory=dict)
@@ -105,6 +133,9 @@ class TaskRecord(BaseModel):
     step_results: list[StepExecution] = Field(default_factory=list)
     summary: str = ""
     learning_note: str | None = None
+    critique: TaskCritique | None = None
+    evolution: EvolutionNote | None = None
+    metrics: TaskMetrics = Field(default_factory=TaskMetrics)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

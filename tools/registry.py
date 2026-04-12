@@ -28,6 +28,8 @@ class ToolRegistry:
         self._agent_tools = {
             "planner": [],
             "executor": ["filesystem", "shell", "python"],
+            "critic": [],
+            "evolution": [],
             "debug": ["filesystem", "shell", "python"],
             "memory": [],
             "web": ["web_search", "web_scrape", "browser"],

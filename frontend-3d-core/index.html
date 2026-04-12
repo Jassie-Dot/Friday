@@ -2,106 +2,54 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FRIDAY — AI Companion</title>
-    <meta name="description" content="FRIDAY — Female Replacement Intelligent Digital Assistant Youth. Your personal AI companion." />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;700;900&family=Space+Grotesk:wght@300;400;500;700&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./src/style.css" />
+    <title>FRIDAY Core</title>
+    <meta
+      name="description"
+      content="FRIDAY real-time voice intelligence core with local speech, streaming reasoning, and a living plasma field."
+    />
   </head>
   <body>
     <div id="app">
       <canvas id="canvas3d"></canvas>
 
-      <!-- ─── HUD OVERLAY ─── -->
-      <div id="friday-hud" class="hud">
-
-        <!-- Top Bar: Status + System Info -->
-        <header id="TopBar" class="component">
-          <div class="top-left">
-            <div class="friday-logo">
-              <div class="logo-ring">
-                <div class="logo-core"></div>
-              </div>
-              <div class="logo-text">
-                <span class="logo-name">FRIDAY</span>
-                <span class="logo-sub">AI COMPANION SYSTEM</span>
-              </div>
+      <div class="hud">
+        <header class="masthead">
+          <div class="brand-mark">
+            <span class="brand-ring"></span>
+            <div>
+              <p class="eyebrow">Local Intelligence Core</p>
+              <h1>FRIDAY</h1>
             </div>
           </div>
-          <div class="top-center">
-            <div class="status-pill" id="status-pill">
-              <div class="status-dot" id="status-dot"></div>
-              <span id="presence-mode">IDLE</span>
-            </div>
-          </div>
-          <div class="top-right">
-            <div class="sys-stats">
-              <span class="stat" id="stat-connection">
-                <svg viewBox="0 0 24 24" width="12" height="12"><circle cx="12" cy="12" r="5" fill="currentColor"/></svg>
-                CONNECTED
-              </span>
-              <span class="stat" id="stat-model">MODEL: MISTRAL:7B</span>
-            </div>
+          <div class="mode-pill" id="mode-pill" data-mode="idle">
+            <span class="mode-dot" id="mode-dot"></span>
+            <span id="mode-label">IDLE</span>
           </div>
         </header>
 
-        <!-- Center: Conversation Panel -->
-        <main id="ConversationArea" class="component">
-          <div id="conversation-panel">
-            <div id="conversation-list">
-              <!-- Chat messages render here -->
-            </div>
+        <main class="center-hud">
+          <div class="caption-stack">
+            <p class="lead-line" id="lead-line">Voice transport offline.</p>
+            <p class="sub-line" id="sub-line">Arm the microphone once and FRIDAY will stay in continuous listening mode.</p>
+            <p class="whisper-line" id="whisper-line">No typing. No chat window. Just signal, thought, and speech.</p>
           </div>
         </main>
 
-        <!-- Bottom: Voice + Input -->
-        <footer id="InputArea" class="component">
-          <div class="input-row">
-            <!-- Always-on mic indicator -->
-            <div class="voice-indicator" id="voice-indicator">
-              <div class="voice-ring"></div>
-              <div class="voice-ring delay-1"></div>
-              <div class="voice-ring delay-2"></div>
-              <button id="mic-toggle" class="mic-btn" title="Toggle Voice Input">
-                <svg viewBox="0 0 24 24" width="22" height="22">
-                  <path fill="currentColor" d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
-                  <path fill="currentColor" d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
-                </svg>
-              </button>
-            </div>
-
-            <!-- Input form -->
-            <form id="objective-form">
-              <input type="text" id="objective-input" placeholder="Talk to FRIDAY..." autocomplete="off" />
-              <button type="submit" class="send-btn" id="send-btn">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                  <path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-                </svg>
-              </button>
-            </form>
+        <footer class="control-strip">
+          <button class="activate-button" id="activate-button" type="button">Arm Voice Core</button>
+          <div class="signal-readout">
+            <span class="signal-label">MIC</span>
+            <div class="signal-bar"><span id="mic-bar"></span></div>
           </div>
-
-          <div class="input-hint" id="input-hint">
-            <span id="voice-status">Say <strong>"Friday"</strong> to activate voice, or type below</span>
+          <div class="signal-readout">
+            <span class="signal-label">VOICE</span>
+            <div class="signal-bar"><span id="voice-bar"></span></div>
           </div>
         </footer>
-
-        <!-- Telemetry Sidebar (collapsed by default) -->
-        <aside id="TelemetryPanel" class="component collapsed">
-          <div class="panel-header">
-            <h3>TELEMETRY</h3>
-            <span class="toggle-icon">›</span>
-          </div>
-          <div class="panel-content">
-            <div id="feed-list"></div>
-          </div>
-        </aside>
-
       </div>
     </div>
+
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

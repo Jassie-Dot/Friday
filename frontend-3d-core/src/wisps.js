@@ -84,9 +84,12 @@ export class WispsSystem {
           pos.y += sin(uTime * 2.0 + phase) * 0.2;
 
           // State-based effects
-          if(uState > 2.5) {
-            // Responding - explosive scatter
+          if(uState > 2.5 && uState < 3.5) {
+            // Speaking - explosive scatter
             pos += normalize(pos) * sin(uTime * 10.0) * 0.5;
+          } else if(uState > 3.5 && uState < 4.5) {
+            // Executing - tighter shock pulses
+            pos += normalize(pos) * step(0.5, sin(uTime * 14.0 + phase)) * 0.22;
           }
 
           vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
@@ -152,7 +155,7 @@ export class WispsSystem {
   }
 
   getStateIndex(mode) {
-    const map = { idle: 0, listening: 1, thinking: 2, responding: 3, error: 4 };
+    const map = { idle: 0, listening: 1, thinking: 2, speaking: 3, executing: 4, error: 5 };
     return map[mode] ?? 0;
   }
 
@@ -164,8 +167,10 @@ export class WispsSystem {
         return { primary: new THREE.Color(0x00FFFF), secondary: new THREE.Color(0xC0C0C0) };
       case 'thinking':
         return { primary: new THREE.Color(0xFF6B00), secondary: new THREE.Color(0xFF003C) };
-      case 'responding':
+      case 'speaking':
         return { primary: new THREE.Color(0xFFD700), secondary: new THREE.Color(0xFFFFFF) };
+      case 'executing':
+        return { primary: new THREE.Color(0x00F5D4), secondary: new THREE.Color(0xF8FFFA) };
       case 'error':
         return { primary: new THREE.Color(0x8B0000), secondary: new THREE.Color(0x000000) };
       default:

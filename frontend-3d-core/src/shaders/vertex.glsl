@@ -37,8 +37,12 @@ void main() {
     pulse = 0.8 + sin(uTime * 12.0) * 0.1;
     proximityBoost *= 1.4; // dense core
   } else if(uState < 3.5) {
-    // Responding: expanded, radiant, flowing
+    // Speaking: expanded, radiant, flowing
     pulse = 1.15 + sin(uTime * 4.0) * 0.15;
+  } else if(uState < 4.5) {
+    // Executing: compressed bursts with sharp staccato spikes
+    pulse = 0.95 + step(0.45, sin(uTime * 18.0) * 0.5 + 0.5) * 0.45;
+    proximityBoost *= 1.25;
   } else {
     // Error: flicker
     pulse = 0.7 + step(0.5, sin(uTime * 20.0) * 0.5 + 0.5) * 0.6;

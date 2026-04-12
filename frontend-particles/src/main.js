@@ -8,7 +8,8 @@ const stateIndex = {
   idle: 0,
   listening: 1,
   thinking: 2,
-  responding: 3,
+  speaking: 3,
+  executing: 2,
   error: 4
 };
 
@@ -305,7 +306,7 @@ function connectRealtime() {
 }
 
 function applyPresence(presence) {
-  currentMode = presence.mode || "idle";
+  currentMode = presence.mode === "responding" ? "speaking" : (presence.mode || "idle");
   headlineEl.textContent = presence.headline || "FRIDAY";
   whisperEl.textContent = presence.whisper || "Standing by";
   noteEl.textContent = presence.current_objective || noteEl.textContent;

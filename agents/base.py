@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from core.events import EventBus
 from core.llm import OllamaClient
 from core.models import AgentEvent, AgentName, MemoryHit, StepExecution, TaskStep
+from core.prompting import PromptLibrary
 from core.realtime import RealtimeHub
 from memory.store import MemoryStore
 from tools.registry import ToolRegistry
@@ -47,6 +48,7 @@ class BaseAgent(ABC):
         tools: ToolRegistry,
         events: EventBus,
         realtime: RealtimeHub,
+        prompts: PromptLibrary | None = None,
     ) -> None:
         self.llm = llm
         self.fast_llm = fast_llm
@@ -54,6 +56,7 @@ class BaseAgent(ABC):
         self.tools = tools
         self.events = events
         self.realtime = realtime
+        self.prompts = prompts
         self._events: list[AgentEvent] = []
 
     @abstractmethod
@@ -72,6 +75,11 @@ class BaseAgent(ABC):
                 payload=payload,
             )
         )
+
+    def resolve_prompt(self, key: str, default_text: str) -> tuple[str, str]:
+        if self.prompts is None:
+            return default_text, "default"
+        return self.prompts.resolve(key, default_text)
 
     async def _tool_plan(self, context: AgentContext, instructions: str, fallback: dict[str, Any]) -> dict[str, Any]:
         payload = {

@@ -4,6 +4,7 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from typing import Any, Literal
 
 import httpx
@@ -31,6 +32,15 @@ class LocalLLM(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def stream_chat(
+        self,
+        messages: list[ChatMessage | dict[str, str]],
+        model: str | None = None,
+        temperature: float | None = None,
+    ) -> AsyncIterator[str]:
+        raise NotImplementedError
+
+    @abstractmethod
     async def health(self) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -43,6 +53,47 @@ def _extract_json_blob(text: str) -> str:
     if not match:
         raise ValueError("No JSON object found in model response.")
     return match.group(1)
+
+
+class _ReasoningCleaner:
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._visible = ""
+        self._in_think = False
+
+    def feed(self, chunk: str) -> str:
+        self._buffer += chunk
+        emitted = []
+        while self._buffer:
+            if self._in_think:
+                end = self._buffer.find("</think>")
+                if end == -1:
+                    return ""
+                self._buffer = self._buffer[end + len("</think>") :]
+                self._in_think = False
+                continue
+
+            start = self._buffer.find("<think>")
+            if start == -1:
+                emitted.append(self._buffer)
+                self._buffer = ""
+                break
+            if start > 0:
+                emitted.append(self._buffer[:start])
+            self._buffer = self._buffer[start + len("<think>") :]
+            self._in_think = True
+
+        visible = "".join(emitted)
+        self._visible += visible
+        return visible
+
+    def finish(self) -> str:
+        if self._in_think:
+            return ""
+        leftover = self._buffer
+        self._buffer = ""
+        self._visible += leftover
+        return leftover
 
 
 class OllamaClient(LocalLLM):
@@ -58,10 +109,7 @@ class OllamaClient(LocalLLM):
         temperature: float | None = None,
         response_format: str | dict[str, Any] | None = None,
     ) -> str:
-        normalized = [
-            message.model_dump() if isinstance(message, ChatMessage) else ChatMessage.model_validate(message).model_dump()
-            for message in messages
-        ]
+        normalized = self._normalize_messages(messages)
         payload: dict[str, Any] = {
             "model": model or self.default_model,
             "messages": normalized,
@@ -76,9 +124,45 @@ class OllamaClient(LocalLLM):
         response = await self._client.post("/api/chat", json=payload)
         response.raise_for_status()
         raw_content = response.json()["message"]["content"]
-        # Strip thinking tags from reasoning models
-        cleaned = re.sub(r"<think>.*?</think>", "", raw_content, flags=re.DOTALL).strip()
-        return cleaned
+        return re.sub(r"<think>.*?</think>", "", raw_content, flags=re.DOTALL).strip()
+
+    async def stream_chat(
+        self,
+        messages: list[ChatMessage | dict[str, str]],
+        model: str | None = None,
+        temperature: float | None = None,
+    ) -> AsyncIterator[str]:
+        normalized = self._normalize_messages(messages)
+        payload: dict[str, Any] = {
+            "model": model or self.default_model,
+            "messages": normalized,
+            "stream": True,
+            "options": {
+                "temperature": self.settings.model_temperature if temperature is None else temperature,
+            },
+        }
+
+        cleaner = _ReasoningCleaner()
+        async with self._client.stream("POST", "/api/chat", json=payload) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.debug("Skipping malformed Ollama stream line: %s", line[:120])
+                    continue
+                chunk = payload.get("message", {}).get("content", "")
+                if chunk:
+                    visible = cleaner.feed(chunk)
+                    if visible:
+                        yield visible
+                if payload.get("done"):
+                    tail = cleaner.finish()
+                    if tail:
+                        yield tail
+                    break
 
     async def json_response(
         self,
@@ -100,3 +184,10 @@ class OllamaClient(LocalLLM):
 
     async def close(self) -> None:
         await self._client.aclose()
+
+    @staticmethod
+    def _normalize_messages(messages: list[ChatMessage | dict[str, str]]) -> list[dict[str, str]]:
+        return [
+            message.model_dump() if isinstance(message, ChatMessage) else ChatMessage.model_validate(message).model_dump()
+            for message in messages
+        ]
